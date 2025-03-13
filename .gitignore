@@ -1,0 +1,115 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# Poetry
+poetry.lock
+
+# FastAPI
+.env
+.env.*
+!.env.example
+
+# 数据库
+*.sqlite3
+*.db
+
+# 日志
+logs/
+*.log
+log.txt
+
+# IDE和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+.vs/
+*.sublime-project
+*.sublime-workspace
+
+# 临时文件
+tmp/
+temp/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# 生成的文件
+*.csv
+*.json
+*.xlsx
+*.xls
+*.parquet
+data/
+static/export/
+
+# 特定于Windows的文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 特定于macOS的文件
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# 特定于项目的文件
+alembic.ini
+celerybeat-schedule
+celerybeat.pid
+
+# 可能包含凭据的文件
+configs/
+secrets/
+credentials/
+
+.auto-coder/
+/actions/
+/output.txt
+.auto-coder/
+/actions/
+/output.txt
