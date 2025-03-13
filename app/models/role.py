@@ -1,9 +1,11 @@
-from sqlalchemy import Column, DateTime, Integer, String
+import uuid
+from sqlalchemy import Column, DateTime, String
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from app.db.base import Base
-from app.models.user import user_role
+from app.db.base_class import Base
+from app.models.association import user_role
 
 
 class Role(Base):
@@ -11,7 +13,7 @@ class Role(Base):
     
     __tablename__ = "roles"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(50), unique=True, index=True, nullable=False)
     description = Column(String(200), nullable=True)
     

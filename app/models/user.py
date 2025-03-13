@@ -1,8 +1,11 @@
+import uuid
 from datetime import datetime
-
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, func, UniqueConstraint
+from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, DateTime, String, func, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base_class import Base
+from app.models.association import user_role
 
 
 class User(Base):
@@ -11,11 +14,13 @@ class User(Base):
     
     Stores user information for authentication and authorization
     """
+    __tablename__ = "users"
+    
     __table_args__ = (
         UniqueConstraint('username', name='uq_user_username'),
         UniqueConstraint('ldap_guid', name='uq_user_ldap_guid'),
     )
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username = Column(String(64), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=True)
     full_name = Column(String(100), nullable=True)
@@ -34,6 +39,10 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    # 关系
+    roles = relationship("Role", secondary=user_role, back_populates="users")
+    conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         return f"<User {self.username}>"

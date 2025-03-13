@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_user_service
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import create_access_token
@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.models.user import User as UserModel
 from app.schemas.token import Token
 from app.schemas.user import User, UserCreate
-from app.services.user import authenticate_user, create_user, get_user_by_email, get_user_by_username, get_user_by_ldap_guid
+from app.services.user import UserService
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -27,13 +27,14 @@ router = APIRouter()
 async def login_access_token(
     db: Annotated[AsyncSession, Depends(get_db)],
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    user_service: Annotated[UserService, Depends(get_user_service)]
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.
     Supports both local and LDAP authentication.
     """
     # First check if user exists
-    user = await get_user_by_username(db, form_data.username)
+    user = await user_service.get_user_by_username(form_data.username)
     if not user:
         logger.warning(f"User not found: {form_data.username}")
         raise HTTPException(
@@ -69,7 +70,7 @@ async def login_access_token(
             )
     else:
         # Handle local user
-        user = await authenticate_user(db, form_data.username, form_data.password)
+        user = await user_service.authenticate_user(form_data.username, form_data.password)
         if not user:
             logger.warning(f"Failed login attempt for user: {form_data.username}")
             raise HTTPException(
@@ -79,7 +80,7 @@ async def login_access_token(
             )
     
     # Check if user is active
-    if not user.is_active:
+    if not user_service.is_active(user):
         logger.warning(f"Inactive user attempted login: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -108,13 +109,13 @@ async def login_access_token(
 @router.post("/register", response_model=User)
 async def register_user(
     user_in: UserCreate,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    user_service: Annotated[UserService, Depends(get_user_service)]
 ) -> Any:
     """
     Register a new user.
     """
     # Check if username already exists
-    user = await get_user_by_username(db, username=user_in.username)
+    user = await user_service.get_user_by_username(user_in.username)
     if user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -123,7 +124,7 @@ async def register_user(
     
     # Check if email already exists (if provided)
     if user_in.email:
-        user = await get_user_by_email(db, email=user_in.email)
+        user = await user_service.get_user_by_email(user_in.email)
         if user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -137,7 +138,7 @@ async def register_user(
     user_create = UserCreate(**user_data)
     
     # Create user
-    new_user = await create_user(db, user_create)
+    new_user = await user_service.create_user(user_create)
     logger.info(f"New user registered: {new_user.username}")
     
     return new_user

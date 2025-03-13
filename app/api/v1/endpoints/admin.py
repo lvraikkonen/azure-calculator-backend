@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from ldap3 import Server, Connection, core
 from app.schemas.user import LDAPTestRequest, LDAPTestResponse
 
-from app.api.deps import get_current_active_superuser
+from app.api.deps import get_current_active_superuser, get_user_service
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import get_db
@@ -18,7 +18,7 @@ from app.schemas.user import (
     SimplifiedLDAPUserCreate,
     LDAPTestRequest, LDAPTestResponse
 )
-from app.services.user import get_user_by_username, get_user_by_ldap_guid
+from app.services.user import UserService
 
 settings = get_settings()
 router = APIRouter()
@@ -56,7 +56,7 @@ async def test_ldap_user_connection(
 @router.post("/search-ldap-user", response_model=LDAPUserSearchResponse)
 async def search_ldap_user(
     request: LDAPUserSearchRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
     current_user: Annotated[UserModel, Depends(get_current_active_superuser)]
 ):
     """通过用户名查询LDAP用户信息"""
@@ -67,12 +67,15 @@ async def search_ldap_user(
             settings=get_settings()
         )
         
+        # 检查用户是否已存在于本地数据库
+        existing_user = await user_service.get_user_by_username(request.username)
+        
         return {
             "username": ldap_data["username"],
             "full_name": ldap_data["displayname"],  # 字段名修改
             "email": ldap_data["email"],
             "ldap_guid": format_ad_guid(ldap_data["guid"]),  # 使用统一的GUID格式化方法
-            "exists_in_local": await get_user_by_username(db, request.username) is not None
+            "exists_in_local": existing_user is not None
         }
     except HTTPException as e:
         raise e  # 直接传递工具函数抛出的HTTP异常
@@ -81,6 +84,7 @@ async def search_ldap_user(
 async def create_ldap_user(
     user_in: Union[LDAPUserCreate, SimplifiedLDAPUserCreate],
     db: Annotated[AsyncSession, Depends(get_db)],
+    user_service: Annotated[UserService, Depends(get_user_service)],
     current_user: Annotated[UserModel, Depends(get_current_active_superuser)],
 ) -> Any:
     """创建LDAP用户（支持自动获取GUID）"""
@@ -96,7 +100,7 @@ async def create_ldap_user(
             )
                 
             # 检查本地用户是否存在
-            if await get_user_by_username(db, user_in.username):
+            if await user_service.get_user_by_username(user_in.username):
                 logger.warning(f"用户已存在: {user_in.username}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -114,7 +118,7 @@ async def create_ldap_user(
 
         # ================== 通用校验逻辑 ==================
         # 检查用户名冲突
-        if await get_user_by_username(db, user_in.username):
+        if await user_service.get_user_by_username(user_in.username):
             logger.warning(f"用户名冲突: {user_in.username}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -122,7 +126,7 @@ async def create_ldap_user(
             )
 
         # 检查GUID重复
-        if await get_user_by_ldap_guid(db, user_in.ldap_guid):
+        if await user_service.get_user_by_ldap_guid(user_in.ldap_guid):
             logger.warning(f"LDAP GUID重复: {user_in.ldap_guid}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

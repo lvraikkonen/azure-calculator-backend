@@ -5,66 +5,71 @@
 
 > 基于FastAPI构建的云原生AI顾问后端系统，支持多租户管理、智能推荐引擎和实时定价计算
 
-## 🚀 当前进度 - Phase1完成
+## 🚀 当前进度 - Phase2完成
 
-**里程碑**：`2025-04-14` 完成基础架构搭建  
-✅ 健康检查端点已上线  
-✅ 认证体系完成开发  
-✅ 数据库基础架构就绪
+**里程碑**：`2025-04-15` 完成智能对话核心功能  
+✅ 聊天API与LLM集成  
+✅ 对话上下文管理  
+✅ 结构化推荐方案生成
 
 ### 已实现功能
 | 模块         | 功能点                     | 验证方法                     | 状态 |
 |--------------|---------------------------|-----------------------------|------|
-| 基础设施     | 健康检查端点               | `GET /api/v1/health`        | ✅   |
-| 认证授权     | JWT令牌认证                | `POST /api/v1/auth/login`   | ✅   |
-|              | LDAP域集成                 | 管理员LDAP测试接口          | ✅   |
-| 用户管理     | 用户注册/登录              | `POST /api/v1/users/`       | ✅   |
-|              | 密码哈希存储               | Bcrypt算法验证              | ✅   |
-| 数据库       | 异步PostgreSQL连接         | 查看启动日志                | ✅   |
-|              | Alembic迁移管理            | 执行`alembic upgrade head` | ✅   |
-| 可观测性     | 结构化日志系统             | 查看`logs/app.log`          | ✅   |
+| **智能对话** | 创建/继续对话              | `POST /api/v1/chat/messages`| ✅   |
+|              | 获取对话历史               | `GET /api/v1/chat/conversations/{id}` | ✅ |
+|              | OpenAI兼容LLM集成         | 查看`llm_service.py`        | ✅   |
+|              | 结构化推荐方案生成         | 检查响应中的recommendation字段 | ✅ |
+|              | 用户反馈系统              | `POST /api/v1/chat/feedback` | ✅  |
+| **基础设施** | 异步消息处理               | 查看`conversation_service.py` | ✅ |
+|              | 对话原子性操作            | 测试中断电恢复场景          | ✅   |
 
 ## ⚙️ 快速启动
 ```bash
-# 安装依赖
-poetry install
+# 安装LLM依赖
+poetry add openai>=1.12.0
 
-# 配置环境变量
-cp .env.example .env
-
-# 启动服务（开发模式）
-uvicorn app.main:app --reload
+# 启动带Swagger文档的服务
+uvicorn app.main:app --reload --port 8080
 ```
 
 ## 📡 API验证示例
 ```bash
-# 健康检查
-curl -X GET "http://localhost:8000/api/v1/health" 
+# 获取访问令牌
+TOKEN=$(curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser", "password":"testpass"}' | jq -r '.access_token')
 
-# 预期响应
-{"status":"healthy","app":"Azure Calculator backend API","version":"0.0.1"}
+# 发起智能对话
+curl -X POST "http://localhost:8000/api/v1/chat/messages/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "我需要高可用性的云数据库方案",
+    "context": {"budget": "1000美元/月"}
+  }'
+
+# 获取对话详情
+CONV_ID="你的对话ID"
+curl -X GET "http://localhost:8000/api/v1/chat/conversations/$CONV_ID" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 🔧 环境配置
 ```ini
-# .env 示例
-POSTGRES_SERVER=localhost
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_password
-POSTGRES_DB=ai_advisor
+# .env 新增配置
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_API_BASE=https://api.openai.com/v1  # 或自定义端点
 
-LDAP_ENABLED=false
-LDAP_SERVER=ldap.example.com
+# 对话保留策略
+MAX_CONVERSATION_AGE=30  # 保留最近30天的对话
 ```
 
 ## 📌 技术要求
-- **运行环境**: Python 3.9+ / Node.js 16+
-- **核心框架**: 
-  - FastAPI 0.100.0+
-  - SQLAlchemy 2.0+
-- **数据库**: 
-  - PostgreSQL 14+ (开发环境)
-  - Azure Cosmos DB (生产环境)
+- **新增依赖**:
+  - `openai>=1.12.0`
+  - `tenacity>=8.2.0` (重试逻辑)
+- **LLM服务**:
+  - OpenAI API 或兼容服务 (Azure OpenAI, LocalAI等)
 
 ## 🧪 测试验证
 ```bash
@@ -76,12 +81,21 @@ pytest --cov=app --cov-report=html
 ```
 
 ## 📍 后续规划
-**Phase2 - LLM集成** (预计2025-04-15启动)
-- [ ] Azure OpenAI服务集成
-- [ ] 对话历史管理API
-- [ ] Markdown响应解析器
+**Phase3 - 生产就绪化** (预计2025-04-20启动)
+- [ ] 流式响应支持
+- [ ] 对话内容审计日志
+- [ ] 多模型路由策略
+- [ ] 成本估算引擎集成
 
-[查看完整项目路线图](./docs/roadmap.md)
+**性能目标**:
+```yaml
+并发能力: 100+ TPS (4核8G实例)
+响应延迟: <1500ms (p99)
+推荐准确率: >85% (基于用户反馈)
+```
+
+[查看完整技术白皮书](./docs/whitepaper.md) | [API测试报告](./docs/test_report.md)
+```
 
 ---
 

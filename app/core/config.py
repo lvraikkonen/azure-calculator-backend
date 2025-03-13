@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import field_validator
+from pydantic import field_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -22,6 +22,17 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore"
     )
+
+    # 标准OpenAI API配置
+    OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
+    OPENAI_API_BASE: Optional[str] = Field(None, env="OPENAI_API_BASE")  # 可选，默认使用标准OpenAI API端点
+    OPENAI_CHAT_MODEL: str = Field("gpt-3.5-turbo", env="OPENAI_CHAT_MODEL")
+    
+    # 保留Azure OpenAI配置作为备选方案
+    AZURE_OPENAI_API_KEY: str = Field("", env="AZURE_OPENAI_API_KEY")
+    AZURE_OPENAI_API_VERSION: str = Field("2023-05-15", env="AZURE_OPENAI_API_VERSION")
+    AZURE_OPENAI_API_BASE: str = Field("", env="AZURE_OPENAI_API_BASE")
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = Field("", env="AZURE_OPENAI_DEPLOYMENT_NAME")
 
     # LDAP configuration
     LDAP_ENABLED: bool = False

@@ -11,6 +11,11 @@ from app.core.logging import get_logger
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.token import TokenPayload
+from app.services.user import UserService
+from app.services.role import RoleService
+from app.services.product import ProductService
+from app.services.llm_service import LLMService
+from app.services.conversation import ConversationService
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -104,71 +109,6 @@ async def get_current_active_user(
         )
     return current_user
 
-
-async def get_current_active_superuser(
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
-    """
-    Dependency to get the current active superuser
-    
-    Args:
-        current_user: Current user from get_current_user dependency
-        
-    Returns:
-        User: Current active superuser
-        
-    Raises:
-        HTTPException: If user is not a superuser
-    """
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The user doesn't have enough privileges",
-        )
-    return current_user
-
-
-def has_required_role(role: str) -> Callable:
-    """
-    Creates a dependency that checks if the current user has the required role
-    
-    Args:
-        role: Required role name
-        
-    Returns:
-        Dependency function that returns the current user if they have the required role
-        
-    Raises:
-        HTTPException: If the user does not have the required role
-    """
-    async def check_role(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-        # 超级管理员始终拥有所有权限
-        if current_user.is_superuser:
-            return current_user
-            
-        # 检查用户是否拥有所需角色
-        if not current_user.groups:
-            logger.warning(f"用户 {current_user.username} 没有分配角色")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="用户没有所需的权限",
-            )
-            
-        # 解析用户的角色（从 groups 字段）
-        user_roles = [r.strip() for r in current_user.groups.split(",")]
-        
-        if role not in user_roles:
-            logger.warning(f"用户 {current_user.username} 没有所需角色: {role}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="用户没有所需的权限",
-            )
-            
-        return current_user
-        
-    return check_role
-
-
 def has_any_role(roles: List[str]) -> Callable:
     """
     创建一个依赖项，检查当前用户是否拥有任一所需角色
@@ -212,3 +152,95 @@ def has_any_role(roles: List[str]) -> Callable:
         return current_user
         
     return check_roles
+
+async def get_user_service(
+    db: AsyncSession = Depends(get_db)
+) -> UserService:
+    """
+    获取用户服务实例
+    """
+    return UserService(db)
+
+async def get_role_service(
+    db: AsyncSession = Depends(get_db)
+) -> RoleService:
+    """
+    获取角色服务实例
+    """
+    return RoleService(db)
+
+async def get_product_service(
+    db: AsyncSession = Depends(get_db)
+) -> ProductService:
+    """
+    获取产品服务实例
+    """
+    return ProductService(db)
+
+async def get_llm_service(
+    product_service: ProductService = Depends(get_product_service)
+) -> LLMService:
+    """
+    获取LLM服务实例
+    """
+    return LLMService(product_service)
+
+async def get_conversation_service(
+    db: AsyncSession = Depends(get_db),
+    llm_service: LLMService = Depends(get_llm_service)
+) -> ConversationService:
+    """
+    获取对话服务实例
+    """
+    return ConversationService(db, llm_service)
+
+
+async def get_current_active_superuser(
+    current_user: User = Depends(get_current_user),
+    user_service: UserService = Depends(get_user_service),
+) -> User:
+    """
+    获取当前活跃的超级用户
+    """
+    if not user_service.is_active(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user"
+        )
+    if not user_service.is_superuser(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    return current_user
+
+def has_required_role(role: str):
+    """
+    检查用户是否具有指定角色
+    
+    这是一个依赖工厂函数，返回实际的依赖函数
+    """
+    async def _has_role(
+        current_user: User = Depends(get_current_user),
+        user_service: UserService = Depends(get_user_service),
+    ) -> User:
+        if not user_service.is_active(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Inactive user"
+            )
+        
+        # 超级用户拥有所有权限
+        if user_service.is_superuser(current_user):
+            return current_user
+            
+        # 检查用户是否有指定角色
+        if not current_user.groups or role not in current_user.groups.split(','):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{role}' required"
+            )
+            
+        return current_user
+    
+    return _has_role
