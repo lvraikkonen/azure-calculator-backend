@@ -1,7 +1,8 @@
-from typing import List
+from typing import List, AsyncGenerator
 from uuid import UUID
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user, get_conversation_service
 from app.models.user import User
@@ -39,6 +40,26 @@ async def create_message(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"消息处理失败: {str(e)}"
+        )
+
+@router.post("/messages/stream", status_code=status.HTTP_200_OK)
+async def create_message_stream(
+    message: MessageCreate,
+    current_user: User = Depends(get_current_user),
+    conversation_service: ConversationService = Depends(get_conversation_service)
+):
+    """
+    发送消息并获取AI流式回复
+    """
+    try:
+        return StreamingResponse(
+            conversation_service.add_message_stream(message, current_user.id),
+            media_type="text/event-stream"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
 
 @router.get("/conversations/", response_model=List[ConversationSummary])

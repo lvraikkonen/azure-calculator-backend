@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import List, Dict, Any, Optional
+import re
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -181,6 +182,135 @@ class LLMService:
                 recommendation=None
             )
 
+    async def chat_stream(
+        self, 
+        user_message: str, 
+        conversation_history: List[Dict[str, Any]] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        流式调用LLM进行对话
+        
+        Args:
+            user_message: 用户消息
+            conversation_history: 对话历史记录
+            
+        Yields:
+            Dict[str, Any]: 包含部分内容、建议或推荐的字典
+        """
+        try:
+            # 获取系统提示
+            system_prompt = await self._build_system_prompt()
+            
+            # 构建消息数组
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            if conversation_history:
+                messages.extend(self._format_conversation_history(conversation_history))
+                
+            # 添加当前用户消息
+            messages.append({"role": "user", "content": user_message})
+            
+            logger.info(f"发送到LLM的流式请求，消息总数: {len(messages)}")
+            
+            # 调用LLM API - 启用流式输出
+            stream = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                top_p=0.95,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stream=True  # 启用流式输出
+            )
+            
+            # 处理流式响应
+            buffer = ""
+            recommendation = None
+            suggestions = []
+            json_started = False
+            json_buffer = ""
+            
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                    
+                delta = chunk.choices[0].delta
+                
+                # 如果delta有内容
+                if delta.content:
+                    content = delta.content
+                    buffer += content
+                    
+                    # 检测JSON开始
+                    if "{" in content and not json_started:
+                        json_started = True
+                        json_buffer = content[content.find("{"):]
+                    # JSON已经开始，继续收集
+                    elif json_started:
+                        json_buffer += content
+                    
+                    # 尝试解析收集到的JSON
+                    if json_started and json_buffer.count('{') == json_buffer.count('}') and json_buffer[-1] == '}':
+                        try:
+                            parsed_json = json.loads(json_buffer)
+                            if 'recommendation' in parsed_json:
+                                recommendation = parsed_json['recommendation']
+                            if 'suggestions' in parsed_json:
+                                suggestions = parsed_json['suggestions']
+                            json_started = False
+                            json_buffer = ""
+                        except:
+                            # 如果解析失败，可能JSON还不完整
+                            pass
+                    
+                    # 只产出文本内容部分
+                    yield {"content": content}
+                    
+            # 流结束后，如果有提取到建议或推荐，则输出
+            if suggestions:
+                yield {"suggestions": suggestions}
+            if recommendation:
+                yield {"recommendation": recommendation}
+                
+            # 如果没有从文本中提取到结构化数据，尝试从完整缓冲区解析
+            if not suggestions and not recommendation and buffer:
+                extracted_data = self._extract_structured_data(buffer)
+                if 'suggestions' in extracted_data:
+                    yield {"suggestions": extracted_data['suggestions']}
+                if 'recommendation' in extracted_data:
+                    yield {"recommendation": extracted_data['recommendation']}
+                    
+        except Exception as e:
+            logger.error(f"流式LLM调用失败: {str(e)}", exc_info=True)
+            yield {"error": f"AI服务暂时不可用: {str(e)}"}
+            
+    def _extract_structured_data(self, text: str) -> Dict[str, Any]:
+        """
+        从文本中提取结构化数据（推荐和建议）
+        """
+        result = {}
+        
+        # 尝试提取JSON
+        json_match = re.search(r'({[\s\S]*})', text)
+        if json_match:
+            try:
+                parsed_data = json.loads(json_match.group(1))
+                if 'recommendation' in parsed_data:
+                    result['recommendation'] = parsed_data['recommendation']
+                if 'suggestions' in parsed_data:
+                    result['suggestions'] = parsed_data['suggestions']
+                return result
+            except:
+                pass
+                
+        # 如果JSON提取失败，尝试使用正则表达式提取建议
+        suggestions = re.findall(r'(?:建议|问题)[:：]\s*(.+?)(?=\n|$)', text)
+        if suggestions:
+            result['suggestions'] = suggestions
+            
+        return result
+    
     async def analyze_user_input(self, user_input: str) -> Dict[str, Any]:
         """
         分析用户输入，识别意图和实体

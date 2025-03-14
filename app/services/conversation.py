@@ -1,6 +1,7 @@
 import logging
 import json
-from typing import List, Dict, Any, Optional
+import asyncio
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from uuid import UUID, uuid4
 from datetime import datetime
 
@@ -273,6 +274,130 @@ class ConversationService:
         
         return ai_response
 
+    async def add_message_stream(self, message_create: MessageCreate, user_id: UUID) -> AsyncGenerator[str, None]:
+        """
+        添加用户消息并获取流式AI回复
+        
+        Args:
+            message_create: 消息创建模型
+            user_id: 用户ID
+            
+        Yields:
+            str: 生成的消息块，按SSE格式
+        """
+        # 获取或创建对话
+        conversation_id = message_create.conversation_id
+        if not conversation_id:
+            conversation_id = await self.create_conversation(user_id)
+        else:
+            # 验证对话存在且属于该用户
+            stmt = select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id
+            )
+            result = await self.db.execute(stmt)
+            conversation = result.scalar_one_or_none()
+            
+            if not conversation:
+                raise ValueError("对话不存在或无权限访问")
+
+        # 存储用户消息
+        user_message_id = await self._store_message(
+            conversation_id, 
+            message_create.content, 
+            "user",
+            message_create.context
+        )
+        
+        # 获取历史对话
+        history = await self._get_conversation_history(conversation_id)
+        
+        # 创建空的AI消息记录占位，稍后更新
+        ai_message_id = await self._store_message(
+            conversation_id,
+            "", # 初始内容为空
+            "ai",
+            {}
+        )
+        
+        # 启动流式生成
+        full_content = ""
+        recommendations = {}
+        suggestions = []
+        
+        try:
+            # 从LLM服务获取流式响应
+            async for chunk in self.llm_service.chat_stream(message_create.content, history):
+                # 累积完整内容
+                if 'content' in chunk:
+                    full_content += chunk['content']
+                
+                # 检测是否包含建议或推荐
+                if 'suggestions' in chunk:
+                    suggestions = chunk['suggestions']
+                if 'recommendation' in chunk:
+                    recommendations = chunk['recommendation']
+                
+                # 发送SSE格式的消息
+                yield f"data: {json.dumps({'id': str(ai_message_id), 'content': chunk.get('content', ''), 'done': False})}\n\n"
+                await asyncio.sleep(0.01)  # 适当的流控制
+                
+            # 发送完成事件，包含完整的推荐等额外信息
+            final_message = {
+                'id': str(ai_message_id),
+                'content': full_content,
+                'conversation_id': str(conversation_id),
+                'done': True,
+                'suggestions': suggestions,
+                'recommendation': recommendations
+            }
+            yield f"data: {json.dumps(final_message)}\n\n"
+            
+            # 更新数据库中的消息
+            context = {}
+            if suggestions:
+                context["suggestions"] = suggestions
+            if recommendations:
+                context["recommendation"] = recommendations
+                
+            await self._update_message(ai_message_id, full_content, context)
+            
+            # 更新对话时间
+            stmt = select(Conversation).where(Conversation.id == conversation_id)
+            result = await self.db.execute(stmt)
+            conversation = result.scalar_one()
+            conversation.updated_at = datetime.utcnow()
+            await self.db.commit()
+            
+        except Exception as e:
+            # 如果出错，发送错误消息
+            error_message = {"error": str(e), "done": True}
+            yield f"data: {json.dumps(error_message)}\n\n"
+            
+            # 记录错误并更新消息
+            logger.error(f"流式生成错误: {str(e)}")
+            await self._update_message(ai_message_id, f"生成错误: {str(e)}", {})
+            await self.db.commit()
+    
+    async def _update_message(self, message_id: UUID, content: str, context: Dict[str, Any] = None) -> None:
+        """
+        更新现有消息
+        
+        Args:
+            message_id: 消息ID
+            content: 新消息内容
+            context: 新消息上下文
+        """
+        stmt = select(Message).where(Message.id == message_id)
+        result = await self.db.execute(stmt)
+        message = result.scalar_one_or_none()
+        
+        if message:
+            message.content = content
+            if context:
+                message.context = context
+            await self.db.commit()
+    
     async def _store_message(
         self, 
         conversation_id: UUID, 
