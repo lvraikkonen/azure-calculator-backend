@@ -4,6 +4,7 @@ import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from uuid import UUID, uuid4
 from datetime import datetime
+from app.core.logging import get_logger
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -15,7 +16,7 @@ from app.models.feedback import Feedback
 from app.schemas.chat import MessageCreate, MessageResponse, ConversationResponse, ConversationSummary
 from app.services.llm_service import LLMService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ConversationService:
     """对话管理服务"""
@@ -277,20 +278,22 @@ class ConversationService:
     async def add_message_stream(self, message_create: MessageCreate, user_id: UUID) -> AsyncGenerator[str, None]:
         """
         添加用户消息并获取流式AI回复
-        
-        Args:
-            message_create: 消息创建模型
-            user_id: 用户ID
-            
-        Yields:
-            str: 生成的消息块，按SSE格式
         """
         # 获取或创建对话
+        logger.info(f"流式消息请求参数: {message_create}")
+        logger.info(f"原始会话ID参数: {message_create.conversation_id}")
         conversation_id = message_create.conversation_id
+        is_new_conversation = False
+        
         if not conversation_id:
+            # 只有在未提供会话ID时才创建新会话
+            logger.warning("请求中未提供会话ID，将创建新会话")
             conversation_id = await self.create_conversation(user_id)
+            is_new_conversation = True
+            logger.info(f"创建新会话: {conversation_id}")
         else:
             # 验证对话存在且属于该用户
+            logger.info(f"请求中提供了会话ID: {conversation_id}，尝试使用现有会话")
             stmt = select(Conversation).where(
                 Conversation.id == conversation_id,
                 Conversation.user_id == user_id
@@ -299,7 +302,12 @@ class ConversationService:
             conversation = result.scalar_one_or_none()
             
             if not conversation:
-                raise ValueError("对话不存在或无权限访问")
+                logger.warning(f"提供的会话ID {conversation_id} 无效或无权访问，将创建新会话")
+                conversation_id = await self.create_conversation(user_id)
+                is_new_conversation = True
+                logger.info(f"创建新会话: {conversation_id}")
+            else:
+                logger.info(f"使用现有会话: {conversation_id}")
 
         # 存储用户消息
         user_message_id = await self._store_message(
@@ -320,6 +328,17 @@ class ConversationService:
             {}
         )
         
+        # 首先发送包含会话ID的初始消息
+        # 关键：使用请求中的会话ID或新创建的会话ID，不要生成新ID
+        initial_message = {
+            'id': str(ai_message_id),
+            'conversation_id': str(conversation_id),
+            'content': '',
+            'is_new_conversation': is_new_conversation,
+            'done': False
+        }
+        yield f"data: {json.dumps(initial_message)}\n\n"
+        
         # 启动流式生成
         full_content = ""
         recommendations = {}
@@ -338,15 +357,16 @@ class ConversationService:
                 if 'recommendation' in chunk:
                     recommendations = chunk['recommendation']
                 
-                # 发送SSE格式的消息
-                yield f"data: {json.dumps({'id': str(ai_message_id), 'content': chunk.get('content', ''), 'done': False})}\n\n"
+                # 发送SSE格式的消息，保持会话ID一致性
+                yield f"data: {json.dumps({'id': str(ai_message_id), 'content': chunk.get('content', ''), 'conversation_id': str(conversation_id), 'done': False})}\n\n"
+                
                 await asyncio.sleep(0.01)  # 适当的流控制
                 
             # 发送完成事件，包含完整的推荐等额外信息
             final_message = {
                 'id': str(ai_message_id),
                 'content': full_content,
-                'conversation_id': str(conversation_id),
+                'conversation_id': str(conversation_id),  # 保持会话ID一致
                 'done': True,
                 'suggestions': suggestions,
                 'recommendation': recommendations
@@ -370,8 +390,12 @@ class ConversationService:
             await self.db.commit()
             
         except Exception as e:
-            # 如果出错，发送错误消息
-            error_message = {"error": str(e), "done": True}
+            # 如果出错，发送错误消息，同样保持会话ID一致性
+            error_message = {
+                "error": str(e), 
+                "done": True,
+                "conversation_id": str(conversation_id)
+            }
             yield f"data: {json.dumps(error_message)}\n\n"
             
             # 记录错误并更新消息
