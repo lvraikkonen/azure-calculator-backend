@@ -36,8 +36,8 @@ class Product(ProductInDB):
     """产品响应模型"""
     
     class Config:
-        orm_mode = True
-        schema_extra = {
+        from_attributes = True
+        json_schema_extra = {
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "product_code": "vm-basic",
