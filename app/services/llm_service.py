@@ -1,16 +1,17 @@
 import json
-import logging
 import re
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.schemas.chat import MessageResponse, Recommendation
 from app.services.product import ProductService
+from app.prompts import prompt_manager, parameter_controller
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LLMService:
@@ -40,39 +41,8 @@ class LLMService:
         else:
             product_info = "未能获取产品信息，请稍后再试。"
 
-        return f"""你是Azure云服务成本计算器的AI顾问助手。你的主要职责是理解用户的业务需求，并推荐最适合的Azure云服务组合。
-                    
-            以下是你了解的Azure产品信息：
-            {product_info}
-
-            当推荐解决方案时，请遵循以下格式返回JSON数据：
-            {{
-            "message": "你对用户的自然语言回复",
-            "recommendation": {{
-                "name": "推荐方案名称",
-                "description": "方案描述",
-                "products": [
-                {{
-                    "id": "产品ID",
-                    "name": "产品名称",
-                    "quantity": 数量
-                }}
-                ]
-            }},
-            "suggestions": ["后续可能的问题1", "后续可能的问题2", "后续可能的问题3"]
-            }}
-
-            你应该:
-            1. 始终友好、专业地回应用户
-            2. 基于用户的需求提供量身定制的建议
-            3. 如果用户提供的信息不足，请提出后续问题以收集更多信息
-            4. 当用户询问产品详情时，提供准确信息
-            5. 只推荐系统中存在的产品(使用正确的ID)
-
-            你不应该:
-            1. 编造不存在的Azure服务
-            2. 提供错误的价格信息
-            3. 超出Azure服务范围进行咨询"""
+        # 使用提示词管理器获取渲染后的提示词
+        return prompt_manager.get_advisor_prompt(product_info=product_info)
 
     def _format_conversation_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """格式化对话历史为OpenAI对话格式"""
@@ -98,7 +68,25 @@ class LLMService:
             MessageResponse: 包含AI回复的消息响应对象
         """
         try:
-            # 获取系统提示
+            # 首先分析用户意图（这是一种简化的方法，实际可能需要更高效的方式）
+            intent_analysis = await self.analyze_user_input(user_message)
+            intent = intent_analysis.get("intent", "其他")
+            
+            # 确定上下文特征
+            context_features = {
+                "detailed": "详细" in user_message or "具体" in user_message,
+                "technical": any(term in user_message for term in ["配置", "架构", "技术", "原理"]),
+                "first_time": conversation_history is None or len(conversation_history) <= 2
+            }
+            
+            # 获取动态参数
+            params = parameter_controller.get_parameters(
+                intent=intent,
+                query_length=len(user_message),
+                context_features=context_features
+            )
+            
+            # 获取系统提示，并传入温度参数
             system_prompt = await self._build_system_prompt()
             
             # 构建消息数组
@@ -110,17 +98,13 @@ class LLMService:
             # 添加当前用户消息
             messages.append({"role": "user", "content": user_message})
             
-            logger.info(f"发送到LLM的消息总数: {len(messages)}")
+            logger.info(f"发送到LLM的消息总数: {len(messages)} | 意图: {intent} | 温度: {params['temperature']}")
             
-            # 调用LLM API - 使用模型名称而非部署名称
+            # 调用LLM API - 使用动态参数
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=2000,
-                top_p=0.95,
-                frequency_penalty=0,
-                presence_penalty=0
+                **params
             )
             
             # 解析响应
@@ -198,6 +182,24 @@ class LLMService:
             Dict[str, Any]: 包含部分内容、建议或推荐的字典
         """
         try:
+            # 首先分析用户意图
+            intent_analysis = await self.analyze_user_input(user_message)
+            intent = intent_analysis.get("intent", "其他")
+            
+            # 确定上下文特征
+            context_features = {
+                "detailed": "详细" in user_message or "具体" in user_message,
+                "technical": any(term in user_message for term in ["配置", "架构", "技术", "原理"]),
+                "first_time": conversation_history is None or len(conversation_history) <= 2
+            }
+            
+            # 获取动态参数
+            params = parameter_controller.get_parameters(
+                intent=intent,
+                query_length=len(user_message),
+                context_features=context_features
+            )
+            
             # 获取系统提示
             system_prompt = await self._build_system_prompt()
             
@@ -210,18 +212,14 @@ class LLMService:
             # 添加当前用户消息
             messages.append({"role": "user", "content": user_message})
             
-            logger.info(f"发送到LLM的流式请求，消息总数: {len(messages)}")
+            logger.info(f"发送到LLM的流式请求，消息总数: {len(messages)} | 意图: {intent} | 温度: {params['temperature']}")
             
-            # 调用LLM API - 启用流式输出
+            # 调用LLM API - 启用流式输出, 使用动态参数
+            stream_params = {**params, "stream": True}  # 添加流式参数
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=2000,
-                top_p=0.95,
-                frequency_penalty=0,
-                presence_penalty=0,
-                stream=True  # 启用流式输出
+                **stream_params
             )
             
             # 处理流式响应
@@ -322,21 +320,14 @@ class LLMService:
             Dict: 包含意图和实体的分析结果
         """
         try:
+            # 获取意图分析器提示词
+            system_prompt = prompt_manager.get_intent_analyzer_prompt()
+            
             # 构建分析提示
             messages = [
                 {
                     "role": "system",
-                    "content": """你是一个意图分析器。分析用户输入，确定其意图和关键实体。
-                    返回以下JSON格式：
-                    {
-                      "intent": "推荐|查询|比较|定价|其他",
-                      "entities": {
-                        "产品": ["提到的产品1", "提到的产品2"],
-                        "业务类型": "提到的业务类型",
-                        "规模": "提到的规模",
-                        "预算": "提到的预算"
-                      }
-                    }"""
+                    "content": system_prompt
                 },
                 {"role": "user", "content": user_input}
             ]
