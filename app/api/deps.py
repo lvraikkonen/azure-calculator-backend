@@ -16,6 +16,7 @@ from app.services.role import RoleService
 from app.services.product import ProductService
 from app.services.llm_service import LLMService
 from app.services.conversation import ConversationService
+from app.services.mongodb_service import MongoDBService, get_mongodb_service
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -170,12 +171,13 @@ async def get_role_service(
     return RoleService(db)
 
 async def get_product_service(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    mongodb_service: MongoDBService = Depends(get_mongodb_service)
 ) -> ProductService:
     """
     获取产品服务实例
     """
-    return ProductService(db)
+    return ProductService(db, mongodb_service)
 
 async def get_llm_service(
     product_service: ProductService = Depends(get_product_service)

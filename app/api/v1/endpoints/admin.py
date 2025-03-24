@@ -4,6 +4,7 @@ from app.utils.ldap_utils import search_ldap_user_in_ad, format_ad_guid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from ldap3 import Server, Connection, core
+from pymongo import MongoClient
 from app.schemas.user import LDAPTestRequest, LDAPTestResponse
 
 from app.api.deps import get_current_active_superuser, get_user_service
@@ -171,4 +172,40 @@ async def create_ldap_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="服务器内部错误"
+        )
+
+@router.get("/sync-stats")
+async def get_sync_stats(
+    days: int,
+    current_user: Annotated[UserModel, Depends(get_current_active_superuser)]
+):
+    """获取同步任务统计信息"""
+    try:
+        # 使用MongoDB服务获取统计信息
+        mongodb_service = MongoDBService()
+        stats = []
+        
+        # 查询同步任务记录
+        cursor = mongodb_service.db.sync_metadata.find(
+            {"sync_type": "azure_prices"},
+            sort=[("start_time", -1)],
+            limit=20
+        )
+        
+        async for doc in cursor:
+            stats.append({
+                "sync_id": str(doc["_id"]),
+                "status": doc["status"],
+                "start_time": doc.get("start_time"),
+                "end_time": doc.get("end_time"),
+                "duration_seconds": doc.get("duration_seconds"),
+                "record_count": doc.get("record_count", 0),
+                "validation": doc.get("validated", False)
+            })
+        
+        return stats
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取同步统计失败: {str(e)}"
         )

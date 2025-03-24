@@ -7,15 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import Product as ProductModel
 from app.schemas.product import Product, ProductCreate, ProductUpdate
+from app.services.mongodb_service import MongoDBService
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ProductService:
     """产品服务，用于提供Azure产品数据"""
     
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: Optional[AsyncSession] = None, mongodb_service: Optional[MongoDBService] = None):
         """初始化产品服务"""
         self.db = db
+        self.mongodb_service = mongodb_service
     
     async def get_all_products(self) -> List[Product]:
         """
@@ -24,15 +27,21 @@ class ProductService:
         Returns:
             List[Product]: 产品列表
         """
-        if self.db:
-            # 使用数据库获取
+        # 优先使用MongoDB
+        if self.mongodb_service:
+            logger.debug("使用MongoDB获取所有产品")
+            return await self.mongodb_service.get_all_products()
+            
+        # 回退到SQL数据库
+        elif self.db:
+            logger.debug("使用SQL数据库获取所有产品")
             stmt = select(ProductModel)
             result = await self.db.execute(stmt)
             products = result.scalars().all()
             return [Product.from_orm(product) for product in products]
         else:
-            # 返回预定义样本数据
-            return self._load_sample_products()
+            logger.error("数据连接未初始化，无法获取产品数据")
+            return []
     
     async def get_product_by_id(self, product_id: str) -> Optional[Product]:
         """
@@ -44,16 +53,20 @@ class ProductService:
         Returns:
             Optional[Product]: 产品信息，如不存在则返回None
         """
-        if self.db:
+        # 优先使用MongoDB
+        if self.mongodb_service:
+            logger.debug(f"使用MongoDB获取产品: {product_id}")
+            return await self.mongodb_service.get_product_by_id(product_id)
+            
+        # 回退到SQL数据库
+        elif self.db:
+            logger.debug(f"使用SQL数据库获取产品: {product_id}")
             stmt = select(ProductModel).where(ProductModel.product_code == product_id)
             result = await self.db.execute(stmt)
             product = result.scalar_one_or_none()
             return Product.from_orm(product) if product else None
         else:
-            # 从样本数据中查找
-            for product in self._load_sample_products():
-                if product.id == product_id:
-                    return product
+            logger.error("数据连接未初始化，无法获取产品数据")
             return None
     
     async def get_products_by_category(self, category: str) -> List[Product]:
@@ -66,14 +79,38 @@ class ProductService:
         Returns:
             List[Product]: 指定分类的产品列表
         """
-        if self.db:
+        # 优先使用MongoDB
+        if self.mongodb_service:
+            logger.debug(f"使用MongoDB获取分类产品: {category}")
+            return await self.mongodb_service.get_products_by_category(category)
+            
+        # 回退到SQL数据库
+        elif self.db:
+            logger.debug(f"使用SQL数据库获取分类产品: {category}")
             stmt = select(ProductModel).where(ProductModel.category == category)
             result = await self.db.execute(stmt)
             products = result.scalars().all()
             return [Product.from_orm(product) for product in products]
         else:
-            # 从样本数据过滤
-            return [p for p in self._load_sample_products() if p.category == category]
+            logger.error("数据连接未初始化，无法获取产品数据")
+            return []
+    
+    async def get_price_trends(self, product_code: str) -> List[dict]:
+        """
+        获取产品价格趋势
+        
+        Args:
+            product_code: 产品代码
+            
+        Returns:
+            List[dict]: 价格趋势数据
+        """
+        if self.mongodb_service:
+            logger.debug(f"获取产品价格趋势: {product_code}")
+            return await self.mongodb_service.get_price_trends(product_code)
+        else:
+            logger.error("MongoDB连接未初始化，无法获取价格趋势")
+            return []
     
     def _load_sample_products(self) -> List[Product]:
         """
