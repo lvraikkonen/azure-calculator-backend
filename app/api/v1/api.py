@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth, users, admin, roles
 from app.api.v1.endpoints import chat, products
+from app.api.v1.endpoints import rag
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -15,6 +16,7 @@ api_router.include_router(admin.router, prefix="/admin", tags=["管理员"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(products.router, prefix="/products", tags=["products"])
 api_router.include_router(roles.router, prefix="/roles", tags=["roles"])
+api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
 
 # 健康检查端点
 @api_router.get("/health")

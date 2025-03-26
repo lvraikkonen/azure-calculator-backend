@@ -16,6 +16,8 @@ from app.services.role import RoleService
 from app.services.product import ProductService
 from app.services.llm_service import LLMService
 from app.services.conversation import ConversationService
+from app.rag.services.hybrid_rag_service import HybridRAGService
+from app.rag.services.rag_factory import create_rag_service
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -244,3 +246,9 @@ def has_required_role(role: str):
         return current_user
     
     return _has_role
+
+async def get_rag_service(
+    llm_service: LLMService = Depends(get_llm_service)
+) -> HybridRAGService:
+    """获取RAG服务实例"""
+    return await create_rag_service(llm_service)
