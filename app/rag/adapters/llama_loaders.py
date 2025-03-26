@@ -3,7 +3,10 @@ LlamaIndex加载器适配器 - 将LlamaIndex文档加载器适配到自定义接
 """
 
 from typing import List, Dict, Any, Optional
+import asyncio
+from functools import partial
 
+# 正确的导入路径
 from llama_index.readers.web import SimpleWebPageReader
 from app.rag.core.interfaces import DocumentLoader
 from app.rag.core.models import Document
@@ -24,9 +27,6 @@ class LlamaWebLoader(DocumentLoader[Document]):
         
         try:
             # LlamaIndex加载器是同步的，使用run_in_executor运行
-            import asyncio
-            from functools import partial
-            
             loop = asyncio.get_event_loop()
             llama_docs = await loop.run_in_executor(
                 None,

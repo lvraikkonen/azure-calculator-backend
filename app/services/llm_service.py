@@ -332,7 +332,7 @@ class LLMService:
                 {"role": "user", "content": user_input}
             ]
             
-            # 调用LLM API进行分析 - 使用模型名称而非部署名称
+            # 调用LLM API进行分析
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -344,10 +344,29 @@ class LLMService:
             analysis_text = response.choices[0].message.content
             
             try:
+                # 清理可能包含的Markdown代码块标记
+                cleaned_text = analysis_text
+                
+                # 移除可能的```json和```标记
+                if "```json" in cleaned_text or "```" in cleaned_text:
+                    import re
+                    cleaned_text = re.sub(r'```json\s*', '', cleaned_text)
+                    cleaned_text = re.sub(r'```\s*', '', cleaned_text)
+                
                 # 尝试解析JSON响应
-                return json.loads(analysis_text)
+                return json.loads(cleaned_text)
             except json.JSONDecodeError:
                 logger.warning(f"分析结果不是有效的JSON: {analysis_text}")
+                
+                # 尝试提取JSON内容 - 使用正则表达式
+                import re
+                json_match = re.search(r'({.*})', analysis_text.replace('\n', ''), re.DOTALL)
+                if json_match:
+                    try:
+                        return json.loads(json_match.group(1))
+                    except:
+                        pass
+                
                 return {"intent": "其他", "entities": {}}
                 
         except Exception as e:

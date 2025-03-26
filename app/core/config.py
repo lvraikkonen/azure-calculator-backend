@@ -1,14 +1,24 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+import logging
 
 from pydantic import field_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
-# 加载根目录下的 .env 文件
-env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(env_path)
+# 加载环境变量文件
+base_path = Path(__file__).resolve().parent.parent.parent
+env_path = base_path / ".env"
+
+try:
+    loaded = load_dotenv(env_path)
+    if loaded:
+        logging.info(f"已加载环境变量文件: {env_path}")
+    else:
+        logging.warning(f"警告: 未能加载环境变量文件 {env_path}，将使用默认值或系统环境变量")
+except Exception as e:
+    logging.error(f"加载环境变量文件出错: {e}")
 
 
 class Settings(BaseSettings):
@@ -34,21 +44,25 @@ class Settings(BaseSettings):
     AZURE_OPENAI_API_BASE: str = Field("", env="AZURE_OPENAI_API_BASE")
     AZURE_OPENAI_DEPLOYMENT_NAME: str = Field("", env="AZURE_OPENAI_DEPLOYMENT_NAME")
 
-    # LDAP configuration
-    LDAP_ENABLED: bool = False
-    LDAP_SERVER: str
-    LDAP_PORT: int
-    LDAP_DOMAIN: str
-    LDAP_BASE_DN: str
-    LDAP_BIND_DN: str
-    LDAP_BIND_PASSWORD: str
+    # LDAP配置
+    LDAP_ENABLED: bool = Field(False, env="LDAP_ENABLED")
+    LDAP_SERVER: str = Field(..., env="LDAP_SERVER")
+    LDAP_PORT: int = Field(389, env="LDAP_PORT")
+    LDAP_DOMAIN: str = Field(..., env="LDAP_DOMAIN")
+    LDAP_BASE_DN: str = Field(..., env="LDAP_BASE_DN")
+    LDAP_BIND_DN: str = Field(..., env="LDAP_BIND_DN")
+    LDAP_BIND_PASSWORD: str = Field(..., env="LDAP_BIND_PASSWORD")
+    LDAP_GROUP_MAPPINGS: Dict[str, str] = Field(default_factory=dict, env="LDAP_GROUP_MAPPINGS")
 
-    # API settings
-    API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Azure Calculator backend API"
+    # API设置
+    API_V1_STR: str = Field("/api/v1", env="API_V1_STR")
+    PROJECT_NAME: str = Field("Azure Calculator backend API", env="PROJECT_NAME")
     
-    # CORS settings
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    # CORS设置
+    BACKEND_CORS_ORIGINS: List[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8000"],
+        env="BACKEND_CORS_ORIGINS"
+    )
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
@@ -58,36 +72,56 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
     
-    # Security settings
-    SECRET_KEY: str
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # 安全设置
+    SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    ALGORITHM: str = Field("HS256", env="ALGORITHM")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     
-    # Database settings - PostgreSQL for development
-    POSTGRES_SERVER: str
-    POSTGRES_PORT: int = 5432
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    SQLALCHEMY_DATABASE_URI: Optional[str] = None
+    # 数据库设置 - PostgreSQL for development
+    POSTGRES_SERVER: str = Field(..., env="POSTGRES_SERVER")
+    POSTGRES_PORT: int = Field(5432, env="POSTGRES_PORT")
+    POSTGRES_USER: str = Field(..., env="POSTGRES_USER")
+    POSTGRES_PASSWORD: str = Field(..., env="POSTGRES_PASSWORD")
+    POSTGRES_DB: str = Field(..., env="POSTGRES_DB")
+    SQLALCHEMY_DATABASE_URI: Optional[str] = Field(None, env="SQLALCHEMY_DATABASE_URI")
     
-    # Database settings - MS SQL Server for production
-    MSSQL_SERVER: Optional[str] = None
-    MSSQL_USER: Optional[str] = None
-    MSSQL_PASSWORD: Optional[str] = None
-    MSSQL_DB: Optional[str] = None
-    MSSQL_DRIVER: Optional[str] = "ODBC Driver 17 for SQL Server"
+    # 数据库设置 - MS SQL Server for production
+    MSSQL_SERVER: Optional[str] = Field(None, env="MSSQL_SERVER")
+    MSSQL_USER: Optional[str] = Field(None, env="MSSQL_USER")
+    MSSQL_PASSWORD: Optional[str] = Field(None, env="MSSQL_PASSWORD")
+    MSSQL_DB: Optional[str] = Field(None, env="MSSQL_DB")
+    MSSQL_DRIVER: Optional[str] = Field("ODBC Driver 17 for SQL Server", env="MSSQL_DRIVER")
     
-    # Celery settings
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    # Celery设置
+    CELERY_BROKER_URL: str = Field("redis://localhost:6379/0", env="CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND: str = Field("redis://localhost:6379/0", env="CELERY_RESULT_BACKEND")
     
-    # Logging settings
-    LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>"
-    LOG_FILE: str = "logs/app.log"
-    LOG_ROTATION: str = "500 MB"  # 日志文件达到一定大小后轮转
-    LOG_RETENTION: str = "10 days"  # 保留日志的时间
+    # 日志设置
+    LOG_LEVEL: str = Field("INFO", env="LOG_LEVEL")
+    LOG_FORMAT: str = Field("<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>", env="LOG_FORMAT")
+    LOG_FILE: str = Field("logs/app.log", env="LOG_FILE")
+    LOG_ROTATION: str = Field("500 MB", env="LOG_ROTATION")
+    LOG_RETENTION: str = Field("10 days", env="LOG_RETENTION")
+
+    # RAG 设置
+    RAG_MODE: str = Field("hybrid", env="RAG_MODE")
+    RAG_RETRIEVER_TYPE: str = Field("vector", env="RAG_RETRIEVER_TYPE")
+    RAG_RETRIEVER_TOP_K: int = Field(5, env="RAG_RETRIEVER_TOP_K") 
+    RAG_RETRIEVER_SCORE_THRESHOLD: float = Field(0.7, env="RAG_RETRIEVER_SCORE_THRESHOLD")
+    RAG_VECTOR_STORE_TYPE: str = Field("memory", env="RAG_VECTOR_STORE_TYPE")
+
+    # LlamaIndex 设置
+    LLAMA_INDEX_EMBED_URL: str = Field("https://api.siliconflow.cn/v1/embeddings", env="LLAMA_INDEX_EMBED_URL")
+    LLAMA_INDEX_EMBED_MODEL: str = Field("BAAI/bge-large-zh-v1.5", env="LLAMA_INDEX_EMBED_MODEL")
+    LLAMA_INDEX_EMBED_APIKEY: str = Field("", env="LLAMA_INDEX_EMBED_APIKEY")
+
+    LLAMA_INDEX_LLM_BASEURL: str = Field("https://api.deepseek.com", env="LLAMA_INDEX_LLM_BASEURL")
+    LLAMA_INDEX_LLM_MODEL: str = Field("BAAI/bge-large-zh-v1.5", env="LLAMA_INDEX_LLM_MODEL")
+    LLAMA_INDEX_LLM_APIKEY: str = Field("", env="LLAMA_INDEX_LLM_APIKEY")
+
+    LLAMA_INDEX_CHUNK_SIZE: int = Field(1000, env="LLAMA_INDEX_CHUNK_SIZE")
+    LLAMA_INDEX_CHUNK_OVERLAP: int = Field(200, env="LLAMA_INDEX_CHUNK_OVERLAP")
+    LLAMA_INDEX_RESPONSE_MODE: str = Field("compact", env="LLAMA_INDEX_RESPONSE_MODE")
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="after")
     def assemble_db_connection(cls, v: Optional[str], info: Dict[str, Any]) -> Any:

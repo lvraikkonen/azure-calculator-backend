@@ -211,7 +211,7 @@ class HybridRAGService(RAGService[Document, QueryResult]):
                 chunks=retrieved_chunks,
                 answer=response.response,
                 sources=sources,
-                raw_response=response.to_dict(),
+                raw_response=None,
                 metadata={
                     "mode": "llama_index",
                     "response_mode": self.config.llama_index.response_mode,

@@ -4,10 +4,13 @@ RAG服务工厂 - 创建RAG服务实例
 
 from typing import Optional, Dict, Any
 
-from llama_index.core import VectorStoreIndex, ServiceContext, StorageContext
+from llama_index.core import VectorStoreIndex, Settings as LlamaSettings
 from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.siliconflow import SiliconFlowEmbedding
 from llama_index.llms.openai import OpenAI
+from llama_index.llms.openrouter import OpenRouter
+from llama_index.llms.deepseek import DeepSeek
 
 from app.rag.core.config import RAGConfig, default_config
 from app.rag.core.models import QueryResult, Document
@@ -50,17 +53,21 @@ async def create_rag_service(
     config = config or default_config
     logger.info(f"创建新的RAG服务实例，模式: {config.mode}")
     
-    # 创建LlamaIndex组件
-    embed_model = OpenAIEmbedding(
+    embed_model = SiliconFlowEmbedding(
         model=config.llama_index.embed_model,
-        api_key=settings.OPENAI_API_KEY,
-        api_base=settings.OPENAI_API_BASE,
+        api_key=settings.LLAMA_INDEX_EMBED_APIKEY,
+        base_url=settings.LLAMA_INDEX_EMBED_URL,
     )
     
-    llm = OpenAI(
+    # llm = OpenAI(
+    #     model=config.llama_index.llm_model,
+    #     api_key=settings.OPENAI_API_KEY,
+    #     api_base=settings.OPENAI_API_BASE,
+    # )
+    llm = DeepSeek(
         model=config.llama_index.llm_model,
-        api_key=settings.OPENAI_API_KEY,
-        api_base=settings.OPENAI_API_BASE,
+        api_key=settings.LLAMA_INDEX_LLM_APIKEY,
+        api_base=settings.LLAMA_INDEX_LLM_BASEURL,
     )
     
     # 创建LlamaIndex节点解析器
@@ -71,15 +78,12 @@ async def create_rag_service(
     )
     
     # 创建LlamaIndex服务上下文
-    service_context = ServiceContext.from_defaults(
-        llm=llm,
-        embed_model=embed_model,
-        node_parser=node_parser,
-    )
+    LlamaSettings.llm = llm
+    LlamaSettings.embed_model = embed_model
+    LlamaSettings.node_parser = node_parser
     
     # 创建LlamaIndex存储上下文和索引
-    storage_context = StorageContext.from_defaults()
-    index = VectorStoreIndex([], storage_context=storage_context, service_context=service_context)
+    index = VectorStoreIndex([])
     
     # 创建文档加载器
     web_loader = LlamaWebLoader()
@@ -113,7 +117,7 @@ async def create_rag_service(
     service = HybridRAGService(
         llm_service=llm_service,
         llama_index=index,
-        service_context=service_context,
+        service_context=LlamaSettings,
         web_loader=web_loader,
         retriever=azure_retriever,
         vector_store=vector_store,

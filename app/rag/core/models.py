@@ -12,10 +12,20 @@ class Metadata(BaseModel):
     source: str
     title: Optional[str] = None
     author: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
     modified_at: Optional[datetime] = None
     content_type: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source": "Azure Docs",
+                "title": "Virtual Machines Overview",
+                "author": "Microsoft",
+                "content_type": "text/markdown"
+            }
+        }
 
 class Document(BaseModel):
     """文档模型"""

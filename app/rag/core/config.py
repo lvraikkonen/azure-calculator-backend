@@ -1,50 +1,84 @@
 """
-RAG系统配置
+RAG system configuration
 """
-
-from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List, Literal
+from pydantic import BaseModel, Field, field_validator
+from app.core.config import get_settings
+
+settings = get_settings()
 
 class LlamaIndexConfig(BaseModel):
-    """LlamaIndex配置"""
+    """LlamaIndex configuration"""
     
-    embed_model: str = "text-embedding-ada-002"
-    llm_model: str = "gpt-3.5-turbo"
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
-    response_mode: Literal["compact", "refine", "tree_summarize"] = "compact"
+    embed_model: str = Field(default=settings.LLAMA_INDEX_EMBED_MODEL)
+    llm_model: str = Field(default=settings.LLAMA_INDEX_LLM_MODEL)  
+    chunk_size: int = Field(default=settings.LLAMA_INDEX_CHUNK_SIZE)
+    chunk_overlap: int = Field(default=settings.LLAMA_INDEX_CHUNK_OVERLAP)
+    response_mode: str = Field(default=settings.LLAMA_INDEX_RESPONSE_MODE)
     
-    # 额外配置
+    # Additional configuration
     extra: Dict[str, Any] = Field(default_factory=dict)
+    
+    @field_validator('response_mode')
+    @classmethod
+    def validate_response_mode(cls, v):
+        valid_modes = ["compact", "refine", "tree_summarize"]
+        if v not in valid_modes:
+            raise ValueError(f"response_mode must be one of {valid_modes}")
+        return v
 
 class RAGConfig(BaseModel):
-    """RAG系统配置"""
+    """RAG system configuration"""
     
-    # 应用模式
-    mode: Literal["llama_index", "custom", "hybrid"] = "hybrid"
+    # Application mode
+    mode: str = Field(default=settings.RAG_MODE)
     
-    # LlamaIndex配置
+    # LlamaIndex configuration
     llama_index: LlamaIndexConfig = Field(default_factory=LlamaIndexConfig)
     
-    # 检索配置
-    retriever_type: Literal["vector", "keyword", "hybrid"] = "vector"
-    retriever_top_k: int = 5
-    retriever_score_threshold: float = 0.7
+    # Retriever configuration
+    retriever_type: str = Field(default=settings.RAG_RETRIEVER_TYPE)
+    retriever_top_k: int = Field(default=settings.RAG_RETRIEVER_TOP_K)
+    retriever_score_threshold: float = Field(default=settings.RAG_RETRIEVER_SCORE_THRESHOLD)
     
-    # 存储配置
-    vector_store_type: Literal["memory", "qdrant"] = "memory"
+    # Vector store configuration
+    vector_store_type: str = Field(default=settings.RAG_VECTOR_STORE_TYPE)
     
-    # 加载器配置
+    # Loader types configuration
     loader_types: Dict[str, str] = Field(
         default_factory=lambda: {
             "web": "llama_index",
-            "file": "llama_index",
+            "file": "llama_index", 
             "azure_api": "custom"
         }
     )
     
-    # 额外配置
+    # Additional configuration
     extra: Dict[str, Any] = Field(default_factory=dict)
+    
+    @field_validator('mode')
+    @classmethod
+    def validate_mode(cls, v):
+        valid_modes = ["llama_index", "custom", "hybrid"]
+        if v not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}")
+        return v
+        
+    @field_validator('retriever_type')
+    @classmethod
+    def validate_retriever_type(cls, v):
+        valid_types = ["vector", "keyword", "hybrid"]
+        if v not in valid_types:
+            raise ValueError(f"retriever_type must be one of {valid_types}")
+        return v
+        
+    @field_validator('vector_store_type')
+    @classmethod
+    def validate_vector_store_type(cls, v):
+        valid_types = ["memory", "qdrant"]
+        if v not in valid_types:
+            raise ValueError(f"vector_store_type must be one of {valid_types}")
+        return v
 
-# 默认配置
+# Create default configuration
 default_config = RAGConfig()

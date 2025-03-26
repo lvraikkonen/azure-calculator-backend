@@ -5,8 +5,7 @@ LlamaIndex存储适配器 - 将LlamaIndex存储适配到自定义接口
 from typing import List, Dict, Any, Optional, cast
 
 from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.core.schema import TextNode, BaseNode, NodeWithScore
-from llama_index.core.vector_stores.types import VectorStore as LlamaVectorStore
+from llama_index.core.schema import TextNode, NodeWithScore
 
 from app.rag.core.interfaces import VectorStore
 from app.rag.core.models import TextChunk
@@ -58,17 +57,23 @@ class LlamaVectorStoreAdapter(VectorStore[TextChunk, List[float]]):
             node_embeddings = [node.embedding for node in nodes]
             
             # 检查所有节点是否都有嵌入
-            for i, (node_id, embedding) in enumerate(zip(node_ids, node_embeddings)):
-                if embedding is None:
+            valid_nodes = []
+            valid_ids = []
+            valid_embeddings = []
+            
+            for i, (node, node_id, embedding) in enumerate(zip(nodes, node_ids, node_embeddings)):
+                if embedding is not None:
+                    valid_nodes.append(node)
+                    valid_ids.append(node_id)
+                    valid_embeddings.append(embedding)
+                else:
                     logger.warning(f"节点 {node_id} 没有嵌入，将跳过")
-                    node_ids.pop(i)
-                    node_embeddings.pop(i)
             
             # 添加到向量存储
-            if node_ids and node_embeddings:
-                self.vector_store.add(node_ids, node_embeddings, nodes)
+            if valid_ids and valid_embeddings:
+                self.vector_store.add(valid_ids, valid_embeddings, valid_nodes)
             
-            logger.debug(f"已添加 {len(node_ids)} 个块到LlamaIndex向量存储")
+            logger.debug(f"已添加 {len(valid_ids)} 个块到LlamaIndex向量存储")
             return node_ids
             
         except Exception as e:
