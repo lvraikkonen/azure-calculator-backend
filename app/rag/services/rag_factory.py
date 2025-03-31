@@ -4,8 +4,12 @@ RAG服务工厂 - 使用新的组件注册表和配置系统
 from typing import Optional, Dict, Any, List, Union
 from pathlib import Path
 
+from app.rag.components import embedders, chunkers, retrievers, rerankers
+from app.rag.components import vector_store, query_transformers, generators, document_loaders
+
 from app.rag.core.registry import RAGComponentRegistry
-from app.rag.core.config import RAGConfig, default_config
+from app.rag.core.config import RAGConfig, default_config, EmbedderConfig, ChunkerConfig, RetrieverConfig, \
+    VectorStoreConfig, QueryTransformerConfig, GeneratorConfig
 from app.rag.services.hybrid_rag_service import HybridRAGService
 from app.rag.evaluation.evaluator import RAGEvaluator
 from app.services.llm_service import LLMService
@@ -87,6 +91,7 @@ async def create_rag_service(
             RAGComponentRegistry.RETRIEVER,
             config.retriever.type,
             vector_store=vector_store,
+            embedding_provider=embedder,
             top_k=config.retriever.top_k,
             score_threshold=config.retriever.score_threshold
         )
@@ -110,13 +115,31 @@ async def create_rag_service(
                     "pipeline",
                     transformers=transformers
                 )
-        
+
         # 创建生成器
+        generator_type = config.generator.type
+        generator_params = {
+            "llm_service": llm_service
+        }
+
+        # 根据生成器类型添加特定参数
+        if generator_type == "default":
+            # DefaultGenerator接受prompt_template而不是prompt_templates
+            prompt_templates = config.generator.prompt_templates
+            generator_params["prompt_template"] = prompt_templates.get("default", None)
+        elif generator_type == "contextual":
+            # ContextualGenerator接受prompt_templates
+            generator_params["prompt_templates"] = config.generator.prompt_templates
+        else:
+            # 其他类型的生成器，添加可能的参数
+            generator_params["prompt_templates"] = config.generator.prompt_templates
+            if config.generator.extra:
+                generator_params.update(config.generator.extra)
+
         generator = overrides.get("generator") or RAGComponentRegistry.create(
             RAGComponentRegistry.GENERATOR,
-            config.generator.type,
-            llm_service=llm_service,
-            prompt_templates=config.generator.prompt_templates
+            generator_type,
+            **generator_params
         )
         
         # 创建文档加载器
@@ -171,3 +194,19 @@ async def get_evaluator(
     _evaluator_instance = evaluator
     
     return evaluator
+
+def clear_rag_service_cache():
+    """
+    清除RAG服务实例缓存
+    """
+    global _service_instance, _evaluator_instance
+
+    # 清除服务实例
+    if _service_instance is not None:
+        logger.info("清除RAG服务实例缓存")
+        _service_instance = None
+
+    # 清除评估器实例
+    if _evaluator_instance is not None:
+        logger.info("清除RAG评估器实例缓存")
+        _evaluator_instance = None

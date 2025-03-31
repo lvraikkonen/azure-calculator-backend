@@ -60,6 +60,42 @@ class VectorStore(ABC, Generic[C, E]):
         """删除向量"""
         pass
 
+
+class QueryTransformer(ABC):
+    """查询转换器接口 - 增强和转换用户查询"""
+
+    @abstractmethod
+    async def transform(self, query: str) -> str:
+        """
+        转换查询
+
+        Args:
+            query: 原始查询
+
+        Returns:
+            str: 转换后的查询
+        """
+        pass
+
+
+class Generator(ABC, Generic[C]):
+    """生成器接口 - 基于检索内容生成回答"""
+
+    @abstractmethod
+    async def generate(self, query: str, chunks: List[C], **kwargs) -> str:
+        """
+        生成回答
+
+        Args:
+            query: 查询文本
+            chunks: 检索结果
+            **kwargs: 其他参数
+
+        Returns:
+            str: 生成的回答
+        """
+        pass
+
 class Retriever(ABC, Generic[C]):
     """检索器接口 - 检索相关内容"""
     

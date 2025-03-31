@@ -18,8 +18,8 @@ class EmbedderConfig(BaseModel):
     
     type: str = Field(default="silicon_flow")
     model: str = Field(default=settings.LLAMA_INDEX_EMBED_MODEL)
-    api_key: str = Field(default="${LLAMA_INDEX_EMBED_APIKEY}")
-    base_url: Optional[str] = Field(default="${LLAMA_INDEX_EMBED_URL}")
+    api_key: str = Field(default=settings.LLAMA_INDEX_EMBED_APIKEY)
+    base_url: Optional[str] = Field(default=settings.LLAMA_INDEX_EMBED_URL)
     
     # 其他参数
     extra: Dict[str, Any] = Field(default_factory=dict)

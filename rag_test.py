@@ -11,7 +11,7 @@ from app.rag.core.models import Document, Metadata
 # 配置日志
 logger = get_logger(__name__)
 
-async def test_rag():
+async def demo_rag():
     # 加载.env文件
     load_dotenv()
     
@@ -75,4 +75,4 @@ async def test_rag():
         logger.info(f"- {source.title} ({source.source})")
 
 if __name__ == "__main__":
-    asyncio.run(test_rag())
+    asyncio.run(demo_rag())

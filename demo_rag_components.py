@@ -16,7 +16,7 @@ from app.rag.services.rag_factory import create_rag_service, get_evaluator
 # 配置日志
 logger = get_logger(__name__)
 
-async def test_components():
+async def demo_components():
     # 加载.env文件
     load_dotenv()
     
@@ -101,4 +101,4 @@ async def test_components():
         logger.info(f"{metric_name}: {score:.2f}")
 
 if __name__ == "__main__":
-    asyncio.run(test_components())
+    asyncio.run(demo_components())

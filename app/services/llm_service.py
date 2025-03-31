@@ -120,40 +120,49 @@ class LLMService:
         解析LLM响应，提取结构化数据
         """
         try:
-            # 尝试找到并解析JSON
-            json_match = response_text.strip().find('{')
-            if json_match != -1:
-                json_str = response_text[json_match:]
+            # 首先检查是否有Markdown代码块格式的JSON
+            import re
+            json_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', response_text)
+
+            if json_block_match:
+                # 提取代码块内的JSON内容
+                json_str = json_block_match.group(1).strip()
                 parsed_data = json.loads(json_str)
-                
-                # 提取推荐
-                recommendation = None
-                if "recommendation" in parsed_data and parsed_data["recommendation"]:
-                    recommendation = Recommendation(**parsed_data["recommendation"])
-                
-                # 构建响应
-                message_content = parsed_data.get("message", response_text)
-                suggestions = parsed_data.get("suggestions", [])
-                
-                return MessageResponse(
-                    id=None,  # ID会在DAO层生成
-                    conversation_id=None,  # 会话ID会在服务层设置
-                    content=message_content,
-                    sender="ai",
-                    suggestions=suggestions,
-                    recommendation=recommendation
-                )
-            
-            # 如果无法解析JSON，返回原始文本响应
+            else:
+                # 使用现有方法查找并解析JSON
+                json_match = response_text.strip().find('{')
+                if json_match != -1:
+                    json_str = response_text[json_match:]
+                    parsed_data = json.loads(json_str)
+                else:
+                    # 没有找到JSON格式内容
+                    return MessageResponse(
+                        id=None,
+                        conversation_id=None,
+                        content=response_text,
+                        sender="ai",
+                        suggestions=[],
+                        recommendation=None
+                    )
+
+            # 提取推荐
+            recommendation = None
+            if "recommendation" in parsed_data and parsed_data["recommendation"]:
+                recommendation = Recommendation(**parsed_data["recommendation"])
+
+            # 构建响应
+            message_content = parsed_data.get("message", response_text)
+            suggestions = parsed_data.get("suggestions", [])
+
             return MessageResponse(
-                id=None,
-                conversation_id=None,
-                content=response_text,
+                id=None,  # ID会在DAO层生成
+                conversation_id=None,  # 会话ID会在服务层设置
+                content=message_content,
                 sender="ai",
-                suggestions=[],
-                recommendation=None
+                suggestions=suggestions,
+                recommendation=recommendation
             )
-            
+
         except Exception as e:
             logger.error(f"解析AI响应失败: {str(e)}", exc_info=True)
             # 回退到纯文本响应
