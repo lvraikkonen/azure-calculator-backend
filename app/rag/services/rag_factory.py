@@ -1,24 +1,13 @@
 """
-RAG服务工厂 - 创建RAG服务实例
+RAG服务工厂 - 使用新的组件注册表和配置系统
 """
+from typing import Optional, Dict, Any, List, Union
+from pathlib import Path
 
-from typing import Optional, Dict, Any
-
-from llama_index.core import VectorStoreIndex, Settings as LlamaSettings
-from llama_index.core.node_parser import SentenceWindowNodeParser
-from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.embeddings.siliconflow import SiliconFlowEmbedding
-from llama_index.llms.openai import OpenAI
-from llama_index.llms.openrouter import OpenRouter
-from llama_index.llms.deepseek import DeepSeek
-
+from app.rag.core.registry import RAGComponentRegistry
 from app.rag.core.config import RAGConfig, default_config
-from app.rag.core.models import QueryResult, Document
-from app.rag.adapters.llama_loaders import LlamaWebLoader
-from app.rag.adapters.llama_retrievers import LlamaVectorRetriever
-from app.rag.adapters.llama_stores import LlamaVectorStoreAdapter
-from app.rag.custom.azure_retriever import AzureServiceRetriever
 from app.rag.services.hybrid_rag_service import HybridRAGService
+from app.rag.evaluation.evaluator import RAGEvaluator
 from app.services.llm_service import LLMService
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -28,10 +17,13 @@ settings = get_settings()
 
 # 服务缓存
 _service_instance = None
+_evaluator_instance = None
 
 async def create_rag_service(
     llm_service: LLMService,
-    config: Optional[RAGConfig] = None,
+    config: Optional[Union[RAGConfig, str, Path]] = None,
+    component_overrides: Optional[Dict[str, Any]] = None,
+    force_new: bool = False
 ) -> HybridRAGService:
     """
     创建RAG服务实例，支持重用已缓存的实例
@@ -39,92 +31,143 @@ async def create_rag_service(
     Args:
         llm_service: LLM服务
         config: RAG配置，为None则使用默认配置
+        component_overrides: 组件覆盖，用于自定义组件
+        force_new: 强制创建新实例，不使用缓存
         
     Returns:
         HybridRAGService: 混合RAG服务
     """
     global _service_instance
     
-    if _service_instance is not None:
+    if _service_instance is not None and not force_new:
         logger.debug("返回已缓存的RAG服务实例")
         return _service_instance
     
-    # 使用提供的配置或默认配置
-    config = config or default_config
+    # 处理配置
+    if isinstance(config, (str, Path)):
+        # 从文件加载配置
+        config = RAGConfig.from_file(config)
+    elif config is None:
+        # 使用默认配置
+        config = default_config
+    
+    # 应用组件覆盖
+    overrides = component_overrides or {}
+    
     logger.info(f"创建新的RAG服务实例，模式: {config.mode}")
     
-    embed_model = SiliconFlowEmbedding(
-        model=config.llama_index.embed_model,
-        api_key=settings.LLAMA_INDEX_EMBED_APIKEY,
-        base_url=settings.LLAMA_INDEX_EMBED_URL,
-    )
+    # 创建组件
+    try:
+        # 创建嵌入模型
+        embedder = overrides.get("embedder") or RAGComponentRegistry.create(
+            RAGComponentRegistry.EMBEDDER,
+            config.embedder.type,
+            model=config.embedder.model,
+            api_key=config.embedder.api_key,
+            base_url=config.embedder.base_url
+        )
+        
+        # 创建分块器
+        chunker = overrides.get("chunker") or RAGComponentRegistry.create(
+            RAGComponentRegistry.CHUNKER,
+            config.chunker.type,
+            chunk_size=config.chunker.chunk_size,
+            chunk_overlap=config.chunker.chunk_overlap
+        )
+        
+        # 创建向量存储
+        vector_store = overrides.get("vector_store") or RAGComponentRegistry.create(
+            RAGComponentRegistry.VECTOR_STORE,
+            config.vector_store.type,
+            embedding_provider=embedder
+        )
+        
+        # 创建检索器
+        retriever = overrides.get("retriever") or RAGComponentRegistry.create(
+            RAGComponentRegistry.RETRIEVER,
+            config.retriever.type,
+            vector_store=vector_store,
+            top_k=config.retriever.top_k,
+            score_threshold=config.retriever.score_threshold
+        )
+        
+        # 创建查询转换器（如果启用）
+        query_transformer = None
+        if config.query_transformer.enabled:
+            transformers = []
+            for transformer_config in config.query_transformer.transformers:
+                if transformer_config.get("enabled", True):
+                    transformer = RAGComponentRegistry.create(
+                        RAGComponentRegistry.QUERY_TRANSFORMER,
+                        transformer_config["type"],
+                        **transformer_config.get("params", {})
+                    )
+                    transformers.append(transformer)
+            
+            if transformers:
+                query_transformer = RAGComponentRegistry.create(
+                    RAGComponentRegistry.QUERY_TRANSFORMER,
+                    "pipeline",
+                    transformers=transformers
+                )
+        
+        # 创建生成器
+        generator = overrides.get("generator") or RAGComponentRegistry.create(
+            RAGComponentRegistry.GENERATOR,
+            config.generator.type,
+            llm_service=llm_service,
+            prompt_templates=config.generator.prompt_templates
+        )
+        
+        # 创建文档加载器
+        document_loader = overrides.get("document_loader") or RAGComponentRegistry.create(
+            RAGComponentRegistry.DOCUMENT_LOADER,
+            "web",  # 默认使用网页加载器
+            html_to_text=True
+        )
+        
+        # 创建服务
+        service = HybridRAGService(
+            llm_service=llm_service,
+            config=config,
+            embedder=embedder,
+            chunker=chunker,
+            retriever=retriever,
+            vector_store=vector_store,
+            generator=generator,
+            document_loader=document_loader,
+            query_transformer=query_transformer
+        )
+        
+        # 缓存服务实例
+        _service_instance = service
+        
+        return service
+        
+    except Exception as e:
+        logger.error(f"创建RAG服务实例失败: {str(e)}", exc_info=True)
+        raise
+
+async def get_evaluator(
+    llm_service: LLMService,
+    force_new: bool = False
+) -> RAGEvaluator:
+    """
+    获取RAG评估器实例
     
-    # llm = OpenAI(
-    #     model=config.llama_index.llm_model,
-    #     api_key=settings.OPENAI_API_KEY,
-    #     api_base=settings.OPENAI_API_BASE,
-    # )
-    llm = DeepSeek(
-        model=config.llama_index.llm_model,
-        api_key=settings.LLAMA_INDEX_LLM_APIKEY,
-        api_base=settings.LLAMA_INDEX_LLM_BASEURL,
-    )
+    Args:
+        llm_service: LLM服务
+        force_new: 强制创建新实例，不使用缓存
+        
+    Returns:
+        RAGEvaluator: RAG评估器
+    """
+    global _evaluator_instance
     
-    # 创建LlamaIndex节点解析器
-    node_parser = SentenceWindowNodeParser.from_defaults(
-        window_size=config.llama_index.chunk_size,
-        window_metadata_key="window",
-        original_text_metadata_key="original_text",
-    )
+    if _evaluator_instance is not None and not force_new:
+        return _evaluator_instance
+        
+    evaluator = RAGEvaluator(llm_service)
+    _evaluator_instance = evaluator
     
-    # 创建LlamaIndex服务上下文
-    LlamaSettings.llm = llm
-    LlamaSettings.embed_model = embed_model
-    LlamaSettings.node_parser = node_parser
-    
-    # 创建LlamaIndex存储上下文和索引
-    index = VectorStoreIndex([])
-    
-    # 创建文档加载器
-    web_loader = LlamaWebLoader()
-    
-    # 创建检索器
-    vector_retriever = LlamaVectorRetriever(
-        index=index,
-        similarity_top_k=config.retriever_top_k,
-        score_threshold=config.retriever_score_threshold,
-    )
-    
-    # 创建Azure特定检索器
-    azure_service_terms = {
-        "Virtual Machine": ["VM", "虚拟机"],
-        "App Service": ["应用服务", "网站服务", "Web服务"],
-        "Azure Kubernetes Service": ["AKS", "k8s", "kubernetes"],
-        "Azure SQL Database": ["SQL DB", "SQLDB", "SQL数据库"],
-        "Cosmos DB": ["宇宙数据库", "文档数据库"],
-        "Storage Account": ["存储账户", "存储"],
-    }
-    
-    azure_retriever = AzureServiceRetriever(
-        base_retriever=vector_retriever,
-        service_terms=azure_service_terms,
-    )
-    
-    # 创建向量存储适配器
-    vector_store = LlamaVectorStoreAdapter(index=index)
-    
-    # 创建混合RAG服务
-    service = HybridRAGService(
-        llm_service=llm_service,
-        llama_index=index,
-        service_context=LlamaSettings,
-        web_loader=web_loader,
-        retriever=azure_retriever,
-        vector_store=vector_store,
-        config=config,
-    )
-    
-    # 缓存服务实例
-    _service_instance = service
-    
-    return service
+    return evaluator
