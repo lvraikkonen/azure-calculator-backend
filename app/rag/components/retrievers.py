@@ -1,12 +1,14 @@
 """
 检索器组件 - 检索相关内容
 """
-from typing import List, Dict, Any, Optional, Type, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from app.rag.core.registry import register_component, RAGComponentRegistry
-from app.rag.core.interfaces import Retriever, VectorStore
+from app.rag.core.interfaces import Retriever, VectorStore, QueryTransformer
 from app.rag.core.models import TextChunk
 from app.core.logging import get_logger
 import time
+import asyncio
+import numpy as np
 
 logger = get_logger(__name__)
 
@@ -617,3 +619,702 @@ class AzureRetriever(Retriever[TextChunk]):
         """检查是否为比较查询"""
         comparison_terms = ["比较", "对比", "区别", "差异", "优缺点", "vs", "versus", "哪个更好"]
         return any(term in query.lower() for term in comparison_terms)
+
+@register_component(RAGComponentRegistry.RETRIEVER, "multi_query_fusion")
+class MultiQueryFusionRetriever(Retriever[TextChunk]):
+    """多查询融合检索器 - 使用多个转换后的查询提高召回率"""
+
+    def __init__(
+            self,
+            base_retriever: Retriever,
+            query_transformer: QueryTransformer,
+            fusion_method: str = "reciprocal_rank",
+            max_queries: int = 3,
+            top_k: int = 5
+    ):
+        """
+        初始化多查询融合检索器
+
+        Args:
+            base_retriever: 基础检索器
+            query_transformer: 查询转换器，用于生成多个查询变体
+            fusion_method: 融合方法，支持 "reciprocal_rank", "rrf", "round_robin", "weighted_sum"
+            max_queries: 最大查询数量
+            top_k: 返回结果数量
+        """
+        self.base_retriever = base_retriever
+        self.query_transformer = query_transformer
+        self.fusion_method = fusion_method
+        self.max_queries = max_queries
+        self.top_k = top_k
+
+    async def retrieve(self, query: str, limit: int = None, **kwargs) -> List[TextChunk]:
+        """
+        检索相关内容
+
+        Args:
+            query: 查询文本
+            limit: 结果数量限制，覆盖top_k
+            **kwargs: 其他参数
+
+        Returns:
+            List[TextChunk]: 检索结果
+        """
+        try:
+            # 记录开始时间
+            start_time = time.time()
+
+            # 使用传入的limit或默认的top_k
+            k = limit if limit is not None else self.top_k
+
+            # 生成多个查询变体
+            queries = await self._generate_query_variants(query)
+            logger.debug(f"生成 {len(queries)} 个查询变体")
+
+            # 并行执行所有查询
+            all_results = []
+            for q in queries:
+                results = await self.base_retriever.retrieve(q, limit=k, **kwargs)
+                all_results.append(results)
+
+            # 融合结果
+            fused_results = await self._fuse_results(all_results, fusion_method=self.fusion_method)
+
+            # 限制结果数量
+            final_results = fused_results[:k]
+
+            # 记录性能
+            elapsed = time.time() - start_time
+            logger.debug(f"多查询融合检索耗时: {elapsed:.3f}秒, 返回 {len(final_results)} 个结果")
+
+            return final_results
+
+        except Exception as e:
+            logger.error(f"多查询融合检索失败: {str(e)}")
+
+            # 如果发生错误，回退到基本检索
+            try:
+                return await self.base_retriever.retrieve(query, limit=limit, **kwargs)
+            except:
+                # 如果仍然失败，返回空结果
+                return []
+
+    async def _generate_query_variants(self, query: str) -> List[str]:
+        """
+        生成查询变体
+
+        Args:
+            query: 原始查询
+
+        Returns:
+            List[str]: 查询变体列表，包括原始查询
+        """
+        # 始终包含原始查询
+        variants = [query]
+
+        try:
+            # 使用查询转换器生成变体
+            transformed = await self.query_transformer.transform(query)
+
+            # 如果转换器返回的是字符串，添加为一个变体
+            if isinstance(transformed, str) and transformed != query:
+                variants.append(transformed)
+
+            # 如果转换器支持子查询（如分解转换器），获取子查询
+            if hasattr(self.query_transformer, "get_sub_queries"):
+                sub_queries = await self.query_transformer.get_sub_queries()
+                variants.extend(sub_queries)
+
+            # 如果支持子查询和策略的组合
+            if hasattr(self.query_transformer, "get_sub_queries_with_strategies"):
+                sub_queries_with_strategies = await self.query_transformer.get_sub_queries_with_strategies()
+                variants.extend([item["query"] for item in sub_queries_with_strategies])
+
+            # 限制变体数量
+            variants = variants[:self.max_queries]
+
+            return variants
+
+        except Exception as e:
+            logger.error(f"生成查询变体失败: {str(e)}")
+            return variants  # 返回仅包含原始查询的列表
+
+    async def _fuse_results(
+            self,
+            all_results: List[List[TextChunk]],
+            fusion_method: str
+    ) -> List[TextChunk]:
+        """
+        融合多个检索结果
+
+        Args:
+            all_results: 多个检索结果的列表
+            fusion_method: 融合方法
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        if not all_results:
+            return []
+
+        # 如果只有一个结果集，直接返回
+        if len(all_results) == 1:
+            return all_results[0]
+
+        # 选择融合方法
+        if fusion_method in ["reciprocal_rank", "rrf"]:
+            return await self._reciprocal_rank_fusion(all_results)
+        elif fusion_method == "round_robin":
+            return await self._round_robin_fusion(all_results)
+        elif fusion_method == "weighted_sum":
+            return await self._weighted_sum_fusion(all_results)
+        else:
+            # 默认使用倒数排名融合
+            return await self._reciprocal_rank_fusion(all_results)
+
+    async def _reciprocal_rank_fusion(self, result_lists: List[List[TextChunk]]) -> List[TextChunk]:
+        """
+        倒数排名融合 (RRF)
+
+        Args:
+            result_lists: 检索结果列表的列表
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        # 创建ID到块的映射
+        id_to_chunk = {}
+        # 创建ID到得分的映射
+        id_to_score = {}
+
+        # 常数k，避免高排名结果的支配
+        k = 60
+
+        # 遍历所有结果列表
+        for results in result_lists:
+            # 遍历当前列表中的每个结果
+            for rank, chunk in enumerate(results):
+                # 将块保存到映射
+                id_to_chunk[chunk.id] = chunk
+
+                # 计算RRF得分
+                rrf_score = 1.0 / (k + rank + 1)
+
+                # 累加得分
+                if chunk.id in id_to_score:
+                    id_to_score[chunk.id] += rrf_score
+                else:
+                    id_to_score[chunk.id] = rrf_score
+
+        # 创建融合结果
+        fused_results = []
+        for chunk_id, score in id_to_score.items():
+            # 获取原始块
+            chunk = id_to_chunk[chunk_id]
+
+            # 创建新块，更新得分
+            fused_chunk = TextChunk(
+                id=chunk.id,
+                doc_id=chunk.doc_id,
+                content=chunk.content,
+                metadata=chunk.metadata,
+                embedding=chunk.embedding,
+                score=score  # 使用RRF得分
+            )
+
+            fused_results.append(fused_chunk)
+
+        # 按融合得分排序
+        fused_results.sort(key=lambda x: x.score or 0, reverse=True)
+
+        return fused_results
+
+    async def _round_robin_fusion(self, result_lists: List[List[TextChunk]]) -> List[TextChunk]:
+        """
+        轮询融合
+
+        Args:
+            result_lists: 检索结果列表的列表
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        fused_results = []
+        chunk_ids = set()  # 用于去重
+
+        # 取每个结果列表的最大长度
+        max_len = max(len(results) for results in result_lists)
+
+        # 轮询添加结果
+        for i in range(max_len):
+            for results in result_lists:
+                if i < len(results):
+                    chunk = results[i]
+                    if chunk.id not in chunk_ids:
+                        fused_results.append(chunk)
+                        chunk_ids.add(chunk.id)
+
+        return fused_results
+
+    async def _weighted_sum_fusion(self, result_lists: List[List[TextChunk]]) -> List[TextChunk]:
+        """
+        加权和融合
+
+        Args:
+            result_lists: 检索结果列表的列表
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        # 创建ID到块的映射
+        id_to_chunk = {}
+        # 创建ID到得分的映射
+        id_to_score = {}
+
+        # 确保所有结果都有分数
+        normalized_results = []
+        for results in result_lists:
+            # 给没有分数的结果分配默认分数
+            scored_results = []
+            for rank, chunk in enumerate(results):
+                score = chunk.score if chunk.score is not None else 1.0 - (rank / (len(results) or 1))
+                new_chunk = TextChunk(
+                    id=chunk.id,
+                    doc_id=chunk.doc_id,
+                    content=chunk.content,
+                    metadata=chunk.metadata,
+                    embedding=chunk.embedding,
+                    score=score
+                )
+                scored_results.append(new_chunk)
+
+            # 归一化分数
+            max_score = max((r.score or 0) for r in scored_results) if scored_results else 1.0
+            normalized = [
+                TextChunk(
+                    id=r.id,
+                    doc_id=r.doc_id,
+                    content=r.content,
+                    metadata=r.metadata,
+                    embedding=r.embedding,
+                    score=(r.score or 0) / max_score if max_score > 0 else 0
+                )
+                for r in scored_results
+            ]
+
+            normalized_results.append(normalized)
+
+        # 计算加权和
+        for results in normalized_results:
+            for chunk in results:
+                # 将块保存到映射
+                id_to_chunk[chunk.id] = chunk
+
+                # 使用标准化后的分数
+                score = chunk.score or 0
+
+                # 累加得分
+                if chunk.id in id_to_score:
+                    id_to_score[chunk.id] += score
+                else:
+                    id_to_score[chunk.id] = score
+
+        # 创建融合结果
+        fused_results = []
+        for chunk_id, score in id_to_score.items():
+            # 获取原始块
+            chunk = id_to_chunk[chunk_id]
+
+            # 创建新块，更新得分
+            fused_chunk = TextChunk(
+                id=chunk.id,
+                doc_id=chunk.doc_id,
+                content=chunk.content,
+                metadata=chunk.metadata,
+                embedding=chunk.embedding,
+                score=score
+            )
+
+            fused_results.append(fused_chunk)
+
+        # 按融合得分排序
+        fused_results.sort(key=lambda x: x.score or 0, reverse=True)
+
+        return fused_results
+
+@register_component(RAGComponentRegistry.RETRIEVER, "rag_fusion")
+class RAGFusionRetriever(Retriever[TextChunk]):
+    """RAG-Fusion检索器 - 专为RAG系统优化的融合检索"""
+
+    def __init__(
+            self,
+            vector_retriever: Retriever,
+            keyword_retriever: Optional[Retriever] = None,
+            query_transformer: Optional[QueryTransformer] = None,
+            fusion_method: str = "reciprocal_rank",
+            top_k: int = 5,
+            auto_rerank: bool = True,
+            vector_weight: float = 0.7,
+            keyword_weight: float = 0.3
+    ):
+        """
+        初始化RAG-Fusion检索器
+
+        Args:
+            vector_retriever: 向量检索器
+            keyword_retriever: 关键词检索器（可选）
+            query_transformer: 查询转换器（可选）
+            fusion_method: 融合方法，支持 "reciprocal_rank", "weighted"
+            top_k: 返回结果数量
+            auto_rerank: 是否自动重排序结果
+            vector_weight: 向量检索结果权重
+            keyword_weight: 关键词检索结果权重
+        """
+        self.vector_retriever = vector_retriever
+        self.keyword_retriever = keyword_retriever
+        self.query_transformer = query_transformer
+        self.fusion_method = fusion_method
+        self.top_k = top_k
+        self.auto_rerank = auto_rerank
+        self.vector_weight = vector_weight
+        self.keyword_weight = keyword_weight
+
+    async def retrieve(self, query: str, limit: int = None, **kwargs) -> List[TextChunk]:
+        """
+        检索相关内容
+
+        Args:
+            query: 查询文本
+            limit: 结果数量限制，覆盖top_k
+            **kwargs: 其他参数
+
+        Returns:
+            List[TextChunk]: 检索结果
+        """
+        try:
+            # 记录开始时间
+            start_time = time.time()
+
+            # 使用传入的limit或默认的top_k
+            k = limit if limit is not None else self.top_k
+
+            # 确定是否有查询分解
+            use_decomposition = self.query_transformer is not None
+
+            # 存储所有结果
+            all_results = []
+
+            # 1. 使用原始查询进行基本检索
+            vector_results = await self.vector_retriever.retrieve(query, limit=k * 2)
+            all_results.append(vector_results)
+
+            # 如果有关键词检索器，添加关键词检索结果
+            if self.keyword_retriever:
+                keyword_results = await self.keyword_retriever.retrieve(query, limit=k * 2)
+                all_results.append(keyword_results)
+
+            # 2. 如果启用了查询转换，获取转换后的查询
+            if use_decomposition:
+                # 转换查询
+                await self.query_transformer.transform(query)
+
+                # 获取子查询
+                if hasattr(self.query_transformer, "get_sub_queries_with_strategies"):
+                    sub_queries_with_strategies = await self.query_transformer.get_sub_queries_with_strategies()
+
+                    # 对每个子查询使用适当的检索器
+                    for item in sub_queries_with_strategies:
+                        sub_query = item["query"]
+                        strategy = item["strategy"]
+
+                        if strategy == "vector":
+                            results = await self.vector_retriever.retrieve(sub_query, limit=k)
+                            all_results.append(results)
+                        elif strategy == "keyword" and self.keyword_retriever:
+                            results = await self.keyword_retriever.retrieve(sub_query, limit=k)
+                            all_results.append(results)
+                        else:
+                            # 默认使用向量检索
+                            results = await self.vector_retriever.retrieve(sub_query, limit=k)
+                            all_results.append(results)
+
+                # 对于旧版本查询转换器，获取普通子查询
+                elif hasattr(self.query_transformer, "get_sub_queries"):
+                    sub_queries = await self.query_transformer.get_sub_queries()
+
+                    # 使用向量检索器检索每个子查询
+                    for sub_query in sub_queries:
+                        results = await self.vector_retriever.retrieve(sub_query, limit=k)
+                        all_results.append(results)
+
+            # 如果没有任何结果，直接返回
+            if not all_results or all(not results for results in all_results):
+                logger.warning(f"RAG-Fusion未找到任何结果: {query}")
+                return []
+
+            # 3. 融合结果
+            if self.fusion_method == "reciprocal_rank":
+                fused_results = await self._reciprocal_rank_fusion(all_results)
+            elif self.fusion_method == "weighted":
+                fused_results = await self._weighted_fusion(all_results)
+            else:
+                # 默认使用RRF
+                fused_results = await self._reciprocal_rank_fusion(all_results)
+
+            # 4. 自动重排序（如果启用）
+            if self.auto_rerank and len(fused_results) > 1:
+                reranked_results = await self._auto_rerank(fused_results, query)
+            else:
+                reranked_results = fused_results
+
+            # 限制结果数量
+            final_results = reranked_results[:k]
+
+            # 记录性能
+            elapsed = time.time() - start_time
+            logger.debug(f"RAG-Fusion检索耗时: {elapsed:.3f}秒, 返回 {len(final_results)} 个结果")
+
+            return final_results
+
+        except Exception as e:
+            logger.error(f"RAG-Fusion检索失败: {str(e)}")
+
+            # 如果发生错误，回退到基本向量检索
+            try:
+                return await self.vector_retriever.retrieve(query, limit=limit, **kwargs)
+            except:
+                # 如果仍然失败，返回空结果
+                return []
+
+    async def _reciprocal_rank_fusion(self, result_lists: List[List[TextChunk]]) -> List[TextChunk]:
+        """
+        倒数排名融合 (RRF)
+
+        Args:
+            result_lists: 检索结果列表的列表
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        # 创建ID到块的映射
+        id_to_chunk = {}
+        # 创建ID到得分的映射
+        id_to_score = {}
+
+        # 常数k，避免高排名结果的支配
+        k = 60
+
+        # 遍历所有结果列表
+        for i, results in enumerate(result_lists):
+            # 跳过空结果
+            if not results:
+                continue
+
+            # 遍历当前列表中的每个结果
+            for rank, chunk in enumerate(results):
+                # 将块保存到映射
+                id_to_chunk[chunk.id] = chunk
+
+                # 计算RRF得分
+                rrf_score = 1.0 / (k + rank + 1)
+
+                # 累加得分
+                if chunk.id in id_to_score:
+                    id_to_score[chunk.id] += rrf_score
+                else:
+                    id_to_score[chunk.id] = rrf_score
+
+        # 创建融合结果
+        fused_results = []
+        for chunk_id, score in id_to_score.items():
+            # 获取原始块
+            chunk = id_to_chunk[chunk_id]
+
+            # 创建新块，更新得分
+            fused_chunk = TextChunk(
+                id=chunk.id,
+                doc_id=chunk.doc_id,
+                content=chunk.content,
+                metadata=chunk.metadata,
+                embedding=chunk.embedding,
+                score=score  # 使用RRF得分
+            )
+
+            fused_results.append(fused_chunk)
+
+        # 按融合得分排序
+        fused_results.sort(key=lambda x: x.score or 0, reverse=True)
+
+        return fused_results
+
+    async def _weighted_fusion(self, result_lists: List[List[TextChunk]]) -> List[TextChunk]:
+        """
+        加权融合
+
+        Args:
+            result_lists: 检索结果列表的列表
+
+        Returns:
+            List[TextChunk]: 融合后的结果
+        """
+        # 如果结果列表为空，返回空列表
+        if not result_lists:
+            return []
+
+        # 过滤空结果列表
+        result_lists = [results for results in result_lists if results]
+        if not result_lists:
+            return []
+
+        # 创建ID到块的映射
+        id_to_chunk = {}
+        # 创建ID到得分的映射
+        id_to_score = {}
+
+        # 确定每个结果列表的权重
+        if len(result_lists) == 1:
+            weights = [1.0]
+        elif len(result_lists) == 2 and self.keyword_retriever:
+            # 假设第一个是向量结果，第二个是关键词结果
+            weights = [self.vector_weight, self.keyword_weight]
+        else:
+            # 默认权重：均分
+            weights = [1.0 / len(result_lists)] * len(result_lists)
+
+        # 遍历所有结果列表
+        for i, (results, weight) in enumerate(zip(result_lists, weights)):
+            # 遍历当前列表中的每个结果
+            for chunk in results:
+                # 将块保存到映射
+                id_to_chunk[chunk.id] = chunk
+
+                # 计算加权得分
+                score = (chunk.score or 0.5) * weight
+
+                # 累加得分
+                if chunk.id in id_to_score:
+                    id_to_score[chunk.id] += score
+                else:
+                    id_to_score[chunk.id] = score
+
+        # 创建融合结果
+        fused_results = []
+        for chunk_id, score in id_to_score.items():
+            # 获取原始块
+            chunk = id_to_chunk[chunk_id]
+
+            # 创建新块，更新得分
+            fused_chunk = TextChunk(
+                id=chunk.id,
+                doc_id=chunk.doc_id,
+                content=chunk.content,
+                metadata=chunk.metadata,
+                embedding=chunk.embedding,
+                score=score  # 使用加权得分
+            )
+
+            fused_results.append(fused_chunk)
+
+        # 按融合得分排序
+        fused_results.sort(key=lambda x: x.score or 0, reverse=True)
+
+        return fused_results
+
+    async def _auto_rerank(self, chunks: List[TextChunk], query: str) -> List[TextChunk]:
+        """
+        自动重排序结果
+
+        Args:
+            chunks: 检索块
+            query: 查询文本
+
+        Returns:
+            List[TextChunk]: 重排序后的结果
+        """
+        # 简化的重排序实现
+        # 实际应用中可能需要更复杂的重排序逻辑
+
+        # 创建重排序特征
+        reranked_chunks = []
+        for chunk in chunks:
+            # 计算附加特征
+            features = self._compute_rerank_features(chunk, query)
+
+            # 计算新得分
+            new_score = chunk.score or 0.5  # 基础得分
+
+            # 应用特征加权
+            for feature, value in features.items():
+                if feature == "title_match":
+                    new_score *= (1 + value * 0.2)  # 标题匹配提升20%
+                elif feature == "freshness":
+                    new_score *= (1 + value * 0.1)  # 新鲜度提升10%
+                elif feature == "content_length":
+                    new_score *= (1 + value * 0.05)  # 内容长度提升5%
+
+            # 创建新块，更新得分
+            reranked_chunk = TextChunk(
+                id=chunk.id,
+                doc_id=chunk.doc_id,
+                content=chunk.content,
+                metadata=chunk.metadata,
+                embedding=chunk.embedding,
+                score=new_score
+            )
+
+            reranked_chunks.append(reranked_chunk)
+
+        # 按新得分排序
+        reranked_chunks.sort(key=lambda x: x.score or 0, reverse=True)
+
+        return reranked_chunks
+
+    def _compute_rerank_features(self, chunk: TextChunk, query: str) -> Dict[str, float]:
+        """
+        计算重排序特征
+
+        Args:
+            chunk: 文本块
+            query: 查询文本
+
+        Returns:
+            Dict[str, float]: 特征字典
+        """
+        features = {}
+
+        # 标题匹配特征
+        title = chunk.metadata.title or ""
+        if any(term.lower() in title.lower() for term in query.lower().split()):
+            features["title_match"] = 1.0
+        else:
+            features["title_match"] = 0.0
+
+        # 内容长度特征（偏好中等长度）
+        content_length = len(chunk.content)
+        if 200 <= content_length <= 1000:
+            features["content_length"] = 1.0
+        elif content_length < 200:
+            features["content_length"] = content_length / 200
+        else:
+            features["content_length"] = 1000 / content_length
+
+        # 新鲜度特征（如果有修改日期）
+        if chunk.metadata.modified_at:
+            import datetime
+            now = datetime.datetime.now()
+            diff = now - chunk.metadata.modified_at
+
+            # 一周内的内容获得满分
+            if diff.days <= 7:
+                features["freshness"] = 1.0
+            # 一个月内的内容得分递减
+            elif diff.days <= 30:
+                features["freshness"] = 1.0 - (diff.days - 7) / 23
+            # 超过一个月的内容得分较低
+            else:
+                features["freshness"] = 0.2
+        else:
+            # 没有修改日期，默认中等新鲜度
+            features["freshness"] = 0.5
+
+        return features
