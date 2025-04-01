@@ -50,72 +50,7 @@ class WebDocumentLoader(DocumentLoader[Document]):
         Returns:
             List[Document]: 文档列表，通常只包含一个文档
         """
-        logger.info(f"从URL加载文档: {source}")
-        
-        try:
-            # 获取自定义参数
-            custom_metadata = kwargs.get("metadata", {})
-            encoding = kwargs.get("encoding", "utf-8")
-            include_images = kwargs.get("include_images", False)
-            
-            # 发送HTTP请求
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    source, 
-                    headers=self.headers, 
-                    timeout=self.timeout
-                ) as response:
-                    
-                    # 检查响应
-                    if response.status != 200:
-                        logger.error(f"加载URL失败: {source}, 状态码: {response.status}")
-                        return []
-                    
-                    # 获取内容类型
-                    content_type = response.headers.get("Content-Type", "")
-                    
-                    # 读取内容
-                    if "application/json" in content_type:
-                        # 处理JSON内容
-                        content = await response.json()
-                        text = json.dumps(content, ensure_ascii=False, indent=2)
-                    else:
-                        # 处理HTML或文本内容
-                        html = await response.text(encoding=encoding)
-                        
-                        if self.html_to_text and "text/html" in content_type:
-                            text = self._html_to_text(html, include_images)
-                        else:
-                            text = html
-            
-            # 创建元数据
-            title = self._extract_title(text) if "text/html" in content_type else ""
-            
-            metadata = Metadata(
-                source=source,
-                title=title or f"网页内容: {source}",
-                created_at=datetime.now(),
-                content_type=content_type,
-                extra={
-                    **custom_metadata,
-                    "url": source,
-                    "status": 200,
-                    "headers": dict(response.headers)
-                }
-            )
-            
-            # 创建文档
-            document = Document(
-                content=text,
-                metadata=metadata
-            )
-            
-            logger.info(f"成功加载文档: {source}, 内容长度: {len(text)}")
-            return [document]
-            
-        except Exception as e:
-            logger.error(f"加载URL失败: {source}, 错误: {str(e)}")
-            return []
+        pass
     
     def _html_to_text(self, html: str, include_images: bool = False) -> str:
         """
@@ -128,49 +63,7 @@ class WebDocumentLoader(DocumentLoader[Document]):
         Returns:
             str: 纯文本内容
         """
-        try:
-            # 尝试使用BeautifulSoup进行更好的解析
-            from bs4 import BeautifulSoup
-            
-            soup = BeautifulSoup(html, "html.parser")
-            
-            # 移除脚本和样式
-            for script in soup(["script", "style"]):
-                script.extract()
-            
-            # 获取图片信息
-            if include_images:
-                for img in soup.find_all("img"):
-                    alt = img.get("alt", "")
-                    src = img.get("src", "")
-                    if alt:
-                        img.replace_with(f"[图片: {alt}]")
-                    elif src:
-                        img.replace_with(f"[图片: {src.split('/')[-1]}]")
-                    else:
-                        img.replace_with("[图片]")
-            
-            # 获取文本
-            text = soup.get_text(separator="\n", strip=True)
-            
-            # 删除多余空行
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            text = "\n".join(chunk for chunk in chunks if chunk)
-            
-            return text
-            
-        except ImportError:
-            # 如果没有BeautifulSoup，使用简单的正则表达式
-            logger.warning("未安装BeautifulSoup，使用简单正则表达式处理HTML")
-            
-            # 移除HTML标签
-            text = re.sub(r"<[^>]*>", " ", html)
-            
-            # 删除多余空格
-            text = re.sub(r"\s+", " ", text).strip()
-            
-            return text
+        pass
     
     def _extract_title(self, html: str) -> str:
         """
@@ -182,19 +75,7 @@ class WebDocumentLoader(DocumentLoader[Document]):
         Returns:
             str: 标题，如果没有找到则返回空字符串
         """
-        # 使用正则表达式提取标题
-        title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-        if title_match:
-            return title_match.group(1).strip()
-        
-        # 尝试从h1标签获取
-        h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", html, re.IGNORECASE | re.DOTALL)
-        if h1_match:
-            # 移除HTML标签
-            h1_text = re.sub(r"<[^>]*>", "", h1_match.group(1))
-            return h1_text.strip()
-        
-        return ""
+        pass
 
 @register_component(RAGComponentRegistry.DOCUMENT_LOADER, "file")
 class FileDocumentLoader(DocumentLoader[Document]):
@@ -437,80 +318,7 @@ class AzureAPIDocumentLoader(DocumentLoader[Document]):
         """
         logger.info(f"从Azure API加载文档: {source}")
         
-        # 获取自定义参数
-        api_version = kwargs.get("api_version", "2022-12-01")
-        custom_metadata = kwargs.get("metadata", {})
-        params = kwargs.get("params", {})
-        
-        # 添加API版本参数
-        params["api-version"] = api_version
-        
-        # 构建URL
-        if source.startswith("http"):
-            url = source
-        else:
-            url = f"{self.api_base}/{source}"
-        
-        try:
-            # 发送API请求
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    headers=self.headers,
-                    params=params
-                ) as response:
-                    
-                    # 检查响应
-                    if response.status != 200:
-                        logger.error(f"API请求失败: {url}, 状态码: {response.status}")
-                        error_text = await response.text()
-                        logger.error(f"错误信息: {error_text}")
-                        return []
-                    
-                    # 获取响应数据
-                    data = await response.json()
-            
-            # 处理响应数据
-            documents = []
-            
-            # 检查数据类型
-            if isinstance(data, list):
-                # 列表数据，每个项创建一个文档
-                for i, item in enumerate(data):
-                    doc = self._create_document_from_item(
-                        item,
-                        source,
-                        f"{source}[{i}]",
-                        custom_metadata
-                    )
-                    documents.append(doc)
-            elif isinstance(data, dict):
-                # 检查是否有value字段(Azure分页响应)
-                if "value" in data and isinstance(data["value"], list):
-                    for i, item in enumerate(data["value"]):
-                        doc = self._create_document_from_item(
-                            item,
-                            source,
-                            f"{source}/value[{i}]",
-                            custom_metadata
-                        )
-                        documents.append(doc)
-                else:
-                    # 单个对象
-                    doc = self._create_document_from_item(
-                        data,
-                        source,
-                        source,
-                        custom_metadata
-                    )
-                    documents.append(doc)
-            
-            logger.info(f"从API加载了 {len(documents)} 个文档")
-            return documents
-            
-        except Exception as e:
-            logger.error(f"加载API文档失败: {url}, 错误: {str(e)}")
-            return []
+        pass
     
     def _create_document_from_item(
         self, 
@@ -531,33 +339,7 @@ class AzureAPIDocumentLoader(DocumentLoader[Document]):
         Returns:
             Document: 文档
         """
-        # 提取可能的标题字段
-        title = None
-        for title_field in ["name", "displayName", "title", "id"]:
-            if title_field in item:
-                title = item.get(title_field)
-                break
-        
-        # 格式化内容
-        content = json.dumps(item, ensure_ascii=False, indent=2)
-        
-        # 创建元数据
-        metadata = Metadata(
-            source=source,
-            title=title or f"Azure API数据: {item_id}",
-            content_type="application/json",
-            extra={
-                **custom_metadata,
-                "api_path": source,
-                "item_id": item_id
-            }
-        )
-        
-        # 创建文档
-        return Document(
-            content=content,
-            metadata=metadata
-        )
+        pass
 
 @register_component(RAGComponentRegistry.DOCUMENT_LOADER, "multi")
 class MultiDocumentLoader(DocumentLoader[Document]):
@@ -595,44 +377,7 @@ class MultiDocumentLoader(DocumentLoader[Document]):
         """
         logger.info(f"从多个源加载文档")
         
-        if isinstance(source, str):
-            # 自动检测源类型
-            loader_type = self._detect_source_type(source)
-            
-            if loader_type in self.loaders:
-                loader = self.loaders[loader_type]
-                return await loader.load(source, **kwargs)
-            else:
-                logger.error(f"未找到适用于源 {source} 的加载器")
-                return []
-        
-        elif isinstance(source, dict):
-            # 源描述字典，包含多个源
-            all_documents = []
-            
-            for loader_type, sources in source.items():
-                if loader_type not in self.loaders:
-                    logger.warning(f"未找到加载器: {loader_type}")
-                    continue
-                
-                loader = self.loaders[loader_type]
-                
-                if isinstance(sources, list):
-                    # 多个源
-                    for src in sources:
-                        docs = await loader.load(src, **kwargs)
-                        all_documents.extend(docs)
-                else:
-                    # 单个源
-                    docs = await loader.load(sources, **kwargs)
-                    all_documents.extend(docs)
-            
-            logger.info(f"从多个源加载了总计 {len(all_documents)} 个文档")
-            return all_documents
-        
-        else:
-            logger.error(f"不支持的源类型: {type(source)}")
-            return []
+        pass
     
     def _detect_source_type(self, source: str) -> str:
         """
