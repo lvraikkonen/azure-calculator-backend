@@ -231,7 +231,6 @@ class FileDocumentLoader(DocumentLoader[Document]):
 
             # 获取自定义参数
             custom_metadata = kwargs.get("metadata", {})
-            encoding = kwargs.get("encoding", "utf-8")
 
             # 创建并使用适合的处理器
             processor = ProcessorFactory.create_processor(file_path)
@@ -241,7 +240,7 @@ class FileDocumentLoader(DocumentLoader[Document]):
                 return []
 
             # 处理文件
-            result = await processor.process(file_path, encoding, **kwargs)
+            result = await processor.process(file_path, **kwargs)
 
             if not result or "content" not in result:
                 logger.error(f"处理器未返回有效内容: {file_path}")

@@ -7,6 +7,7 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 class RAGComponentRegistry:
     """RAG组件注册表 - 单例模式"""
     
@@ -154,6 +155,7 @@ class RAGComponentRegistry:
             "docstring": component_class.__doc__ or "",
             "parameters": params
         }
+
 
 # 装饰器，方便注册组件
 def register_component(component_type: str, name: str):

@@ -11,6 +11,7 @@ import re
 
 logger = get_logger(__name__)
 
+
 @register_component(RAGComponentRegistry.CHUNKER, "sentence_window")
 class SentenceWindowChunker(ContentProcessor[Document, TextChunk]):
     """句子窗口分块器 - 使用滑动窗口分割文档"""
@@ -88,6 +89,7 @@ class SentenceWindowChunker(ContentProcessor[Document, TextChunk]):
         except Exception as e:
             logger.error(f"文档分块失败: {str(e)}")
             raise
+
 
 @register_component(RAGComponentRegistry.CHUNKER, "advanced_semantic")
 class AdvancedSemanticChunker(ContentProcessor[Document, TextChunk]):
