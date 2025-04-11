@@ -2,7 +2,6 @@
 提示词模板引擎
 使用Jinja2实现模板渲染
 """
-import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape

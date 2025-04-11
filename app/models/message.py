@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -15,7 +15,7 @@ class Message(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     content = Column(Text, nullable=False)
     sender = Column(String(10), nullable=False)  # 'user' or 'ai'
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.now(tz=timezone.utc), index=True)
     context = Column(JSONB, nullable=True)  # 存储建议、推荐等JSON数据
     
     # 关系

@@ -1,14 +1,12 @@
-import logging
 import json
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from uuid import UUID, uuid4
-from datetime import datetime
+from uuid import UUID
+from datetime import datetime, timezone
 from app.core.logging import get_logger
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, delete
 
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -17,6 +15,7 @@ from app.schemas.chat import MessageCreate, MessageResponse, ConversationRespons
 from app.services.llm_service import LLMService
 
 logger = get_logger(__name__)
+
 
 class ConversationService:
     """对话管理服务"""
@@ -40,8 +39,8 @@ class ConversationService:
         conversation = Conversation(
             user_id=user_id,
             title=title,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(tz=timezone.utc),
+            updated_at=datetime.now(tz=timezone.utc)
         )
         
         self.db.add(conversation)
@@ -172,7 +171,7 @@ class ConversationService:
             
         # 更新标题
         conversation.title = title
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(tz=timezone.utc)
         
         await self.db.commit()
         return True
@@ -239,6 +238,8 @@ class ConversationService:
             "user",
             message_create.context
         )
+
+        logger.info(f"User message {user_message_id} stored in conversation {conversation_id}")
         
         # 获取历史对话
         history = await self._get_conversation_history(conversation_id)
@@ -254,7 +255,7 @@ class ConversationService:
         if ai_response.suggestions:
             context["suggestions"] = ai_response.suggestions
         if ai_response.recommendation:
-            context["recommendation"] = ai_response.recommendation.dict()
+            context["recommendation"] = ai_response.recommendation.model_dump()
             
         ai_message_id = await self._store_message(
             conversation_id,
@@ -267,7 +268,7 @@ class ConversationService:
         stmt = select(Conversation).where(Conversation.id == conversation_id)
         result = await self.db.execute(stmt)
         conversation = result.scalar_one()
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(tz=timezone.utc)
         await self.db.commit()
         
         # 设置AI回复的ID
@@ -316,6 +317,8 @@ class ConversationService:
             "user",
             message_create.context
         )
+
+        logger.info(f"User message {user_message_id} stored in conversation {conversation_id}")
         
         # 获取历史对话
         history = await self._get_conversation_history(conversation_id)
@@ -386,7 +389,7 @@ class ConversationService:
             stmt = select(Conversation).where(Conversation.id == conversation_id)
             result = await self.db.execute(stmt)
             conversation = result.scalar_one()
-            conversation.updated_at = datetime.utcnow()
+            conversation.updated_at = datetime.now(tz=timezone.utc)
             await self.db.commit()
             
         except Exception as e:
@@ -435,7 +438,7 @@ class ConversationService:
         Args:
             conversation_id: 对话ID
             content: 消息内容
-            sender: 发送者，'user'或'ai'
+            sender: 发送者，'user' 或 'ai'
             context: 消息上下文，可选
             
         Returns:
@@ -445,7 +448,7 @@ class ConversationService:
             conversation_id=conversation_id,
             content=content,
             sender=sender,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(tz=timezone.utc),
             context=context or {}
         )
         
@@ -516,13 +519,13 @@ class ConversationService:
         if existing_feedback:
             existing_feedback.feedback_type = feedback_type
             existing_feedback.comment = comment
-            existing_feedback.created_at = datetime.utcnow()
+            existing_feedback.created_at = datetime.now(tz=timezone.utc)
         else:
             feedback = Feedback(
                 message_id=message_id,
                 feedback_type=feedback_type,
                 comment=comment,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(tz=timezone.utc)
             )
             self.db.add(feedback)
             

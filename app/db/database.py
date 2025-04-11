@@ -6,7 +6,7 @@ from app.core.logging import get_logger
 settings = get_settings()
 logger = get_logger(__name__)
 
-# Create async engine - 注意不指定 poolclass
+# Create async engine
 # 对于异步引擎，SQLAlchemy 会自动使用 AsyncAdaptedQueuePool
 engine = create_async_engine(
     settings.SQLALCHEMY_DATABASE_URI,

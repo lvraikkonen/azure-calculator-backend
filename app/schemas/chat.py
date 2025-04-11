@@ -26,7 +26,7 @@ class MessageResponse(MessageBase):
     """消息响应模型"""
     id: Optional[UUID] = Field(default_factory=uuid4, description="消息ID")
     conversation_id: Optional[UUID] = Field(None, description="会话ID")
-    sender: str = Field(..., description="发送者，'user'或'ai'")
+    sender: str = Field(..., description="发送者，'user' 或 'ai'")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="消息时间戳")
     suggestions: Optional[List[str]] = Field(default=[], description="下一步建议列表")
     recommendation: Optional[Recommendation] = Field(None, description="产品推荐")
@@ -85,7 +85,7 @@ class ConversationSummary(ConversationBase):
 class FeedbackCreate(BaseModel):
     """反馈请求模型"""
     message_id: UUID = Field(..., description="消息ID")
-    feedback_type: str = Field(..., description="反馈类型，例如'like'或'dislike'")
+    feedback_type: str = Field(..., description="反馈类型，例如 'like' 或 'dislike'")
     comment: Optional[str] = Field(None, description="反馈详情")
 
     @validator('feedback_type')

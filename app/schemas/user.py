@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, TYPE_CHECKING, Any
+from typing import Optional, TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator

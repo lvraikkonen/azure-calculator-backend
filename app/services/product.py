@@ -1,6 +1,5 @@
 from typing import List, Optional
 import logging
-from uuid import UUID
 
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession

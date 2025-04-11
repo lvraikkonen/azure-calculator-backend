@@ -1,7 +1,7 @@
 import time
 import uuid
 from functools import wraps
-from typing import List, Optional, Any, Dict
+from typing import List, Any, Dict
 from fastapi import HTTPException
 from app.core.logging import async_log_user_operation
 
