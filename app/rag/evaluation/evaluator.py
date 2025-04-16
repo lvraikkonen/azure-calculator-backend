@@ -6,7 +6,7 @@ import time
 from app.rag.core.models import QueryResult
 from app.rag.evaluation.base import Metric, EvaluationResult
 from app.rag.evaluation.metrics import RelevanceMetric, FaithfulnessMetric, ContextPrecisionMetric
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService
 from app.core.logging import get_logger
 from datetime import datetime
 
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class RAGEvaluator:
     """RAG评估器"""
     
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: BaseLLMService):
         """
         初始化RAG评估器
         

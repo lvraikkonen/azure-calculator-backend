@@ -1,18 +1,22 @@
 import json
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from app.core.logging import get_logger
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import update, delete
 
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.feedback import Feedback
 from app.schemas.chat import MessageCreate, MessageResponse, ConversationResponse, ConversationSummary
-from app.services.llm_service import LLMService
+from app.services.llm.factory import LLMServiceFactory
+from app.services.llm.base import ModelType, ContextProvider
+from app.services.product import ProductService
+from app.services.llm.context_providers import ProductContextProvider
 
 logger = get_logger(__name__)
 
@@ -20,10 +24,29 @@ logger = get_logger(__name__)
 class ConversationService:
     """对话管理服务"""
 
-    def __init__(self, db: AsyncSession, llm_service: LLMService):
+    def __init__(self, db: AsyncSession, llm_factory: LLMServiceFactory,
+                 product_service: Optional[ProductService] = None):
         """初始化对话服务"""
         self.db = db
-        self.llm_service = llm_service
+        self.llm_factory = llm_factory
+        self.product_service = product_service
+
+    async def _get_context_providers(self) -> List[ContextProvider]:
+        """获取上下文提供者列表"""
+        providers = []
+
+        # 如果有产品服务，添加产品上下文提供者
+        if self.product_service:
+            providers.append(ProductContextProvider(self.product_service))
+
+        # TODO: 添加其他上下文提供者
+
+        return providers
+
+    async def _get_llm_service(self, model_type: str = None, model_name: str = None):
+        """获取LLM服务实例"""
+        model_type_enum = ModelType(model_type) if model_type else None
+        return await self.llm_factory.get_service(model_type_enum, model_name)
 
     async def create_conversation(self, user_id: UUID, title: str = "新对话") -> UUID:
         """
@@ -88,7 +111,8 @@ class ConversationService:
                 sender=msg.sender,
                 timestamp=msg.timestamp,
                 suggestions=msg.context.get("suggestions", []) if msg.context else [],
-                recommendation=msg.context.get("recommendation") if msg.context else None
+                recommendation=msg.context.get("recommendation") if msg.context else None,
+                thinking=msg.context.get("thinking") if msg.context else None
             )
             for msg in messages
         ]
@@ -205,16 +229,7 @@ class ConversationService:
         return True
 
     async def add_message(self, message_create: MessageCreate, user_id: UUID) -> MessageResponse:
-        """
-        添加用户消息并获取AI回复
-        
-        Args:
-            message_create: 消息创建模型
-            user_id: 用户ID
-            
-        Returns:
-            MessageResponse: AI回复消息
-        """
+        """添加用户消息并获取AI回复"""
         # 获取或创建对话
         conversation_id = message_create.conversation_id
         if not conversation_id:
@@ -227,65 +242,79 @@ class ConversationService:
             )
             result = await self.db.execute(stmt)
             conversation = result.scalar_one_or_none()
-            
+
             if not conversation:
                 raise ValueError("对话不存在或无权限访问")
 
         # 存储用户消息
         user_message_id = await self._store_message(
-            conversation_id, 
-            message_create.content, 
+            conversation_id,
+            message_create.content,
             "user",
             message_create.context
         )
 
-        logger.info(f"User message {user_message_id} stored in conversation {conversation_id}")
-        
         # 获取历史对话
         history = await self._get_conversation_history(conversation_id)
-        
+
+        # 获取上下文提供者
+        context_providers = await self._get_context_providers()
+
+        # 获取LLM服务
+        model_type = message_create.context.get("model_type") if message_create.context else None
+        model_name = message_create.context.get("model_name") if message_create.context else None
+        llm_service = await self._get_llm_service(model_type, model_name)
+
         # 调用LLM获取回复
-        ai_response = await self.llm_service.chat(message_create.content, history)
-        
-        # 补充对话ID
-        ai_response.conversation_id = conversation_id
-        
+        ai_response = await llm_service.chat(message_create.content, history, context_providers)
+
+        # 构建消息响应
+        message_response = MessageResponse(
+            id=None,  # 稍后设置
+            conversation_id=conversation_id,
+            content=ai_response.get("content", ""),
+            sender="ai",
+            suggestions=ai_response.get("suggestions", []),
+            recommendation=ai_response.get("recommendation"),
+            thinking=ai_response.get("thinking")
+        )
+
         # 存储AI回复
         context = {}
-        if ai_response.suggestions:
-            context["suggestions"] = ai_response.suggestions
-        if ai_response.recommendation:
-            context["recommendation"] = ai_response.recommendation.model_dump()
-            
+        if message_response.suggestions:
+            context["suggestions"] = message_response.suggestions
+        if message_response.recommendation:
+            context[
+                "recommendation"] = message_response.recommendation.dict() if message_response.recommendation else None
+        if ai_response.get("thinking"):
+            context["thinking"] = ai_response["thinking"]
+
         ai_message_id = await self._store_message(
             conversation_id,
-            ai_response.content,
+            message_response.content,
             "ai",
             context
         )
-        
+
         # 更新对话时间
         stmt = select(Conversation).where(Conversation.id == conversation_id)
         result = await self.db.execute(stmt)
         conversation = result.scalar_one()
-        conversation.updated_at = datetime.now(tz=timezone.utc)
+        conversation.updated_at = datetime.utcnow()
         await self.db.commit()
-        
+
         # 设置AI回复的ID
-        ai_response.id = ai_message_id
-        
-        return ai_response
+        message_response.id = ai_message_id
+
+        return message_response
 
     async def add_message_stream(self, message_create: MessageCreate, user_id: UUID) -> AsyncGenerator[str, None]:
-        """
-        添加用户消息并获取流式AI回复
-        """
+        """添加用户消息并获取流式AI回复"""
         # 获取或创建对话
         logger.info(f"流式消息请求参数: {message_create}")
-        logger.info(f"原始会话ID参数: {message_create.conversation_id}")
         conversation_id = message_create.conversation_id
         is_new_conversation = False
-        
+
         if not conversation_id:
             # 只有在未提供会话ID时才创建新会话
             logger.warning("请求中未提供会话ID，将创建新会话")
@@ -301,7 +330,7 @@ class ConversationService:
             )
             result = await self.db.execute(stmt)
             conversation = result.scalar_one_or_none()
-            
+
             if not conversation:
                 logger.warning(f"提供的会话ID {conversation_id} 无效或无权访问，将创建新会话")
                 conversation_id = await self.create_conversation(user_id)
@@ -312,27 +341,27 @@ class ConversationService:
 
         # 存储用户消息
         user_message_id = await self._store_message(
-            conversation_id, 
-            message_create.content, 
+            conversation_id,
+            message_create.content,
             "user",
             message_create.context
         )
 
-        logger.info(f"User message {user_message_id} stored in conversation {conversation_id}")
-        
         # 获取历史对话
         history = await self._get_conversation_history(conversation_id)
-        
+
+        # 获取上下文提供者
+        context_providers = await self._get_context_providers()
+
         # 创建空的AI消息记录占位，稍后更新
         ai_message_id = await self._store_message(
             conversation_id,
-            "", # 初始内容为空
+            "",  # 初始内容为空
             "ai",
             {}
         )
-        
+
         # 首先发送包含会话ID的初始消息
-        # 关键：使用请求中的会话ID或新创建的会话ID，不要生成新ID
         initial_message = {
             'id': str(ai_message_id),
             'conversation_id': str(conversation_id),
@@ -341,84 +370,105 @@ class ConversationService:
             'done': False
         }
         yield f"data: {json.dumps(initial_message)}\n\n"
-        
+
+        # 获取LLM服务
+        model_type = message_create.context.get("model_type") if message_create.context else None
+        model_name = message_create.context.get("model_name") if message_create.context else None
+        llm_service = await self._get_llm_service(model_type, model_name)
+
         # 启动流式生成
         full_content = ""
-        recommendations = {}
+        thinking_content = ""
+        recommendations = None
         suggestions = []
-        
+
         try:
             # 从LLM服务获取流式响应
-            async for chunk in self.llm_service.chat_stream(message_create.content, history):
-                # 累积完整内容
+            async for chunk in llm_service.chat_stream(message_create.content, history, context_providers):
+                # 根据不同类型的块进行处理
+                if 'error' in chunk:
+                    yield f"data: {json.dumps({'error': chunk['error'], 'done': True})}\n\n"
+                    continue
+
+                # 处理推理模式切换
+                if 'mode' in chunk:
+                    mode = chunk['mode']
+                    if mode == 'thinking_started':
+                        yield f"data: {json.dumps({'thinking_mode': True, 'done': False})}\n\n"
+                        continue
+                    elif mode == 'thinking_ended':
+                        thinking_content = chunk.get('thinking', '')
+                        yield f"data: {json.dumps({'thinking_mode': False, 'thinking': thinking_content, 'done': False})}\n\n"
+                        continue
+                    elif mode == 'thinking':
+                        # 流式传输推理内容
+                        yield f"data: {json.dumps({'thinking_chunk': chunk.get('thinking', ''), 'done': False})}\n\n"
+                        continue
+
+                # 处理内容块
                 if 'content' in chunk:
-                    full_content += chunk['content']
-                
+                    content = chunk['content']
+                    full_content += content
+                    yield f"data: {json.dumps({'id': str(ai_message_id), 'content': content, 'conversation_id': str(conversation_id), 'done': False})}\n\n"
+
                 # 检测是否包含建议或推荐
                 if 'suggestions' in chunk:
                     suggestions = chunk['suggestions']
                 if 'recommendation' in chunk:
                     recommendations = chunk['recommendation']
-                
-                # 发送SSE格式的消息，保持会话ID一致性
-                yield f"data: {json.dumps({'id': str(ai_message_id), 'content': chunk.get('content', ''), 'conversation_id': str(conversation_id), 'done': False})}\n\n"
-                
+
                 await asyncio.sleep(0.01)  # 适当的流控制
-                
+
             # 发送完成事件，包含完整的推荐等额外信息
             final_message = {
                 'id': str(ai_message_id),
                 'content': full_content,
-                'conversation_id': str(conversation_id),  # 保持会话ID一致
+                'conversation_id': str(conversation_id),
                 'done': True,
                 'suggestions': suggestions,
-                'recommendation': recommendations
+                'recommendation': recommendations,
+                'thinking': thinking_content
             }
             yield f"data: {json.dumps(final_message)}\n\n"
-            
+
             # 更新数据库中的消息
             context = {}
             if suggestions:
                 context["suggestions"] = suggestions
             if recommendations:
                 context["recommendation"] = recommendations
-                
+            if thinking_content:
+                context["thinking"] = thinking_content
+
             await self._update_message(ai_message_id, full_content, context)
-            
+
             # 更新对话时间
             stmt = select(Conversation).where(Conversation.id == conversation_id)
             result = await self.db.execute(stmt)
             conversation = result.scalar_one()
-            conversation.updated_at = datetime.now(tz=timezone.utc)
+            conversation.updated_at = datetime.utcnow()
             await self.db.commit()
-            
+
         except Exception as e:
-            # 如果出错，发送错误消息，同样保持会话ID一致性
+            # 如果出错，发送错误消息
             error_message = {
-                "error": str(e), 
+                "error": str(e),
                 "done": True,
                 "conversation_id": str(conversation_id)
             }
             yield f"data: {json.dumps(error_message)}\n\n"
-            
+
             # 记录错误并更新消息
             logger.error(f"流式生成错误: {str(e)}")
             await self._update_message(ai_message_id, f"生成错误: {str(e)}", {})
             await self.db.commit()
-    
+
     async def _update_message(self, message_id: UUID, content: str, context: Dict[str, Any] = None) -> None:
-        """
-        更新现有消息
-        
-        Args:
-            message_id: 消息ID
-            content: 新消息内容
-            context: 新消息上下文
-        """
+        """更新现有消息"""
         stmt = select(Message).where(Message.id == message_id)
         result = await self.db.execute(stmt)
         message = result.scalar_one_or_none()
-        
+
         if message:
             message.content = content
             if context:
@@ -459,22 +509,14 @@ class ConversationService:
         return message.id
 
     async def _get_conversation_history(self, conversation_id: UUID) -> List[Dict[str, Any]]:
-        """
-        获取对话历史
-        
-        Args:
-            conversation_id: 对话ID
-            
-        Returns:
-            List[Dict[str, Any]]: 对话历史列表
-        """
+        """获取对话历史"""
         stmt = select(Message).where(
             Message.conversation_id == conversation_id
         ).order_by(Message.timestamp.asc())
-        
+
         result = await self.db.execute(stmt)
         messages = result.scalars().all()
-        
+
         return [
             {
                 "id": str(msg.id),

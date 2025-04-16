@@ -7,7 +7,7 @@ import math
 import time
 from app.rag.core.models import QueryResult
 from app.rag.evaluation.base import Metric
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class RelevanceMetric(Metric):
     """相关性评估指标 - 评估检索内容与查询的相关性"""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: BaseLLMService):
         self.llm_service = llm_service
 
     async def calculate(self, query_result: QueryResult, **kwargs) -> float:
@@ -85,7 +85,7 @@ class RelevanceMetric(Metric):
 class FaithfulnessMetric(Metric):
     """忠实度评估指标 - 评估生成内容与检索内容的一致性"""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: BaseLLMService):
         self.llm_service = llm_service
 
     async def calculate(self, query_result: QueryResult, **kwargs) -> float:
@@ -195,7 +195,7 @@ class ContextPrecisionMetric(Metric):
 class AnswerCompletenessMetric(Metric):
     """回答完整性评估指标 - 评估生成回答的完整性"""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: BaseLLMService):
         self.llm_service = llm_service
 
     async def calculate(self, query_result: QueryResult, **kwargs) -> float:
@@ -257,7 +257,7 @@ class AnswerCompletenessMetric(Metric):
 class ConciseMeaningfulnessMetric(Metric):
     """简洁有意义性评估指标 - 评估回答的简洁性和有意义性"""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: BaseLLMService):
         self.llm_service = llm_service
 
     async def calculate(self, query_result: QueryResult, **kwargs) -> float:

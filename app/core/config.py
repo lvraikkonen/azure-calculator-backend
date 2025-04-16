@@ -37,12 +37,20 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field("", env="OPENAI_API_KEY")
     OPENAI_API_BASE: Optional[str] = Field(None, env="OPENAI_API_BASE")  # 可选，默认使用标准OpenAI API端点
     OPENAI_CHAT_MODEL: str = Field("gpt-3.5-turbo", env="OPENAI_CHAT_MODEL")
+
+    # Deepseek配置
+    DEEPSEEK_API_KEY: str = Field("", env="DEEPSEEK_API_KEY")
+    DEEPSEEK_API_BASE: Optional[str] = Field(None, env="DEEPSEEK_API_BASE")
+    DEEPSEEK_R1_MODEL: str = Field("deepseek-reasoner", env="DEEPSEEK_R1_MODEL")
+    DEEPSEEK_V3_MODEL: str = Field("deepseek-chat", env="DEEPSEEK_V3_MODEL")
     
     # 保留Azure OpenAI配置作为备选方案
     AZURE_OPENAI_API_KEY: str = Field("", env="AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_API_VERSION: str = Field("2023-05-15", env="AZURE_OPENAI_API_VERSION")
     AZURE_OPENAI_API_BASE: str = Field("", env="AZURE_OPENAI_API_BASE")
     AZURE_OPENAI_DEPLOYMENT_NAME: str = Field("", env="AZURE_OPENAI_DEPLOYMENT_NAME")
+
+    DEFAULT_MODEL_TYPE: str = Field("deepseek", env="DEFAULT_MODEL_TYPE")
 
     # LDAP配置
     LDAP_ENABLED: bool = Field(False, env="LDAP_ENABLED")

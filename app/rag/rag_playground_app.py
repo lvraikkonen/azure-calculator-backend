@@ -24,7 +24,7 @@ from app.rag.evaluation.benchmark.runner import BenchmarkRunner
 from app.rag.evaluation.benchmark.datasets import BenchmarkDataset
 from app.rag.evaluation.benchmark.analysis import BenchmarkAnalyzer
 from app.rag.core.models import Document, TextChunk, QueryResult
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService
 
 # 启用asyncio在非事件循环的环境中运行
 nest_asyncio.apply()

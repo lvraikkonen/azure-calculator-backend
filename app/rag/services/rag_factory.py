@@ -12,7 +12,7 @@ from app.rag.core.config import RAGConfig, default_config, EmbedderConfig, Chunk
     VectorStoreConfig, QueryTransformerConfig, GeneratorConfig
 from app.rag.services.hybrid_rag_service import HybridRAGService
 from app.rag.evaluation.evaluator import RAGEvaluator
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService, ContextProvider
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -24,7 +24,7 @@ _service_instance = None
 _evaluator_instance = None
 
 async def create_rag_service(
-    llm_service: LLMService,
+    llm_service: BaseLLMService,
     config: Optional[Union[RAGConfig, str, Path]] = None,
     component_overrides: Optional[Dict[str, Any]] = None,
     force_new: bool = False
@@ -33,7 +33,7 @@ async def create_rag_service(
     创建RAG服务实例，支持重用已缓存的实例
     
     Args:
-        llm_service: LLM服务
+        llm_service: 实现BaseLLMService的服务
         config: RAG配置，为None则使用默认配置
         component_overrides: 组件覆盖，用于自定义组件
         force_new: 强制创建新实例，不使用缓存
@@ -172,7 +172,7 @@ async def create_rag_service(
         raise
 
 async def get_evaluator(
-    llm_service: LLMService,
+    llm_service: BaseLLMService,
     force_new: bool = False
 ) -> RAGEvaluator:
     """

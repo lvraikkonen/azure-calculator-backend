@@ -11,7 +11,7 @@ from app.rag.core.interfaces import QueryTransformer, Generator
 from app.rag.core.models import Document, TextChunk, QueryResult, Source
 from app.rag.core.config import RAGConfig, default_config
 from app.rag.evaluation.evaluator import RAGEvaluator
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +21,7 @@ class HybridRAGService(RAGService[Document, QueryResult]):
     
     def __init__(
         self,
-        llm_service: LLMService,
+        llm_service: BaseLLMService,
         config: RAGConfig = default_config,
         embedder: Optional[EmbeddingProvider] = None,
         chunker: Optional[ContentProcessor] = None,

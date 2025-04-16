@@ -14,13 +14,17 @@ from app.schemas.token import TokenPayload
 from app.services.user import UserService
 from app.services.role import RoleService
 from app.services.product import ProductService
-from app.services.llm_service import LLMService
+from app.services.llm.factory import LLMServiceFactory
+from app.services.llm.base import ModelType, BaseLLMService, ContextProvider
+from app.services.llm.context_providers import ProductContextProvider
 from app.services.conversation import ConversationService
 from app.rag.services.hybrid_rag_service import HybridRAGService
 from app.rag.services.rag_factory import create_rag_service
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+llm_factory = LLMServiceFactory()
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
@@ -179,23 +183,67 @@ async def get_product_service(
     """
     return ProductService(db)
 
+async def get_llm_factory() -> LLMServiceFactory:
+    """
+    获取LLM服务工厂实例
+    """
+    return llm_factory
+
+
 async def get_llm_service(
-    product_service: ProductService = Depends(get_product_service)
-) -> LLMService:
+        product_service: ProductService = Depends(get_product_service),
+        llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory)
+) -> BaseLLMService:
     """
-    获取LLM服务实例
+    获取默认LLM服务实例，使用ProductContextProvider
     """
-    return LLMService(product_service)
+    # 创建产品上下文提供者
+    context_provider = ProductContextProvider(product_service)
+
+    # 获取默认服务
+    service = await llm_factory_instance.get_service()
+
+    # 为了保持兼容，设置一个内部属性存储上下文提供者
+    setattr(service, "_context_providers", [context_provider])
+
+    return service
 
 async def get_conversation_service(
     db: AsyncSession = Depends(get_db),
-    llm_service: LLMService = Depends(get_llm_service)
+    llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory),
+    product_service: ProductService = Depends(get_product_service)
 ) -> ConversationService:
     """
     获取对话服务实例
     """
-    return ConversationService(db, llm_service)
+    return ConversationService(db, llm_factory_instance, product_service)
 
+
+async def get_model_service(
+        model_type: ModelType,
+        model_name: Optional[str] = None,
+        context_providers: List[ContextProvider] = None,
+        llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory)
+) -> BaseLLMService:
+    """
+    获取指定类型的LLM服务实例，支持提供上下文提供者
+
+    Args:
+        model_type: 模型类型枚举
+        model_name: 具体模型名称（可选）
+        context_providers: 上下文提供者列表
+        llm_factory_instance: LLM服务工厂
+
+    Returns:
+        BaseLLMService: 指定类型的LLM服务实例
+    """
+    service = await llm_factory_instance.get_service(model_type, model_name)
+
+    # 如果提供了上下文提供者，保存到服务实例中
+    if context_providers:
+        setattr(service, "_context_providers", context_providers)
+
+    return service
 
 async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),
@@ -248,7 +296,7 @@ def has_required_role(role: str):
     return _has_role
 
 async def get_rag_service(
-    llm_service: LLMService = Depends(get_llm_service)
+    llm_service: BaseLLMService = Depends(get_llm_service)
 ) -> HybridRAGService:
     """获取RAG服务实例"""
     return await create_rag_service(llm_service)

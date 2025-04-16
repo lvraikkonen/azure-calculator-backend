@@ -30,6 +30,7 @@ class MessageResponse(MessageBase):
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="消息时间戳")
     suggestions: Optional[List[str]] = Field(default=[], description="下一步建议列表")
     recommendation: Optional[Recommendation] = Field(None, description="产品推荐")
+    thinking: Optional[str] = None
 
     class Config:
         json_schema_extra = {

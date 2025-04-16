@@ -6,7 +6,7 @@ import logging
 import datetime
 from typing import List, Optional
 
-from app.services.llm_service import LLMService
+from app.services.llm.base import BaseLLMService
 from app.rag.services.rag_factory import create_rag_service, get_evaluator
 from app.rag.evaluation.benchmark.datasets import BenchmarkDataset
 from app.rag.evaluation.benchmark.runner import BenchmarkRunner
@@ -41,7 +41,7 @@ async def main():
     run_name = args.run_name or f"benchmark-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     # 创建LLM服务
-    llm_service = LLMService()
+    llm_service = BaseLLMService()
 
     # 创建RAG服务
     rag_service = await create_rag_service(llm_service)
@@ -111,7 +111,7 @@ async def main():
             print(f"  {category}: {cat_score:.4f}")
 
 
-def register_all_metrics(evaluator, llm_service: LLMService):
+def register_all_metrics(evaluator, llm_service: BaseLLMService):
     """注册所有评估指标"""
     # 基础质量指标
     evaluator.register_metric(RelevanceMetric(llm_service))
