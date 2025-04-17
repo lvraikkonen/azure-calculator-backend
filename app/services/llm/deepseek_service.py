@@ -130,11 +130,12 @@ class DeepseekService(BaseLLMService):
                 context_features=context_features
             )
 
-            # 获取系统提示
-            system_prompt = await self._build_system_prompt(context_providers)
-
-            # 构建消息数组
-            messages = [{"role": "system", "content": system_prompt}]
+            # # 获取系统提示
+            # system_prompt = await self._build_system_prompt(context_providers)
+            #
+            # # 构建消息数组
+            # messages = [{"role": "system", "content": system_prompt}]
+            messages = []
 
             if conversation_history:
                 messages.extend(self._format_conversation_history(conversation_history))
@@ -197,11 +198,12 @@ class DeepseekService(BaseLLMService):
                 context_features=context_features
             )
 
-            # 获取系统提示
-            system_prompt = await self._build_system_prompt(context_providers)
+            # # 获取系统提示
+            # system_prompt = await self._build_system_prompt(context_providers)
 
-            # 构建消息数组
-            messages = [{"role": "system", "content": system_prompt}]
+            # # 构建消息数组
+            # messages = [{"role": "system", "content": system_prompt}]
+            messages = []
 
             if conversation_history:
                 messages.extend(self._format_conversation_history(conversation_history))
@@ -220,89 +222,25 @@ class DeepseekService(BaseLLMService):
                 **stream_params
             )
 
-            # 处理流式响应
-            buffer = ""
-            reasoning_buffer = ""  # 专用于推理内容
-            in_reasoning_mode = False  # 用于非推理模型的思维链跟踪
-
+            # 处理流式响应 - 简化版，直接映射API结构
             async for chunk in stream:
                 if not chunk.choices:
                     continue
 
                 delta = chunk.choices[0].delta
+                result = {}
 
-                # 处理推理模型专有的reasoning_content字段
-                if self.is_reasoning_model and hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    # 处于推理模式中
-                    if not in_reasoning_mode:
-                        in_reasoning_mode = True
-                        # 通知客户端进入推理模式
-                        yield {"mode": "thinking_started"}
+                # 处理推理内容 - 直接提供reasoning_content
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    result['reasoning_content'] = delta.reasoning_content
 
-                    # 收集推理内容
-                    reasoning_buffer += delta.reasoning_content
-                    yield {"mode": "thinking", "thinking": delta.reasoning_content}
-                    continue
-
-                # 处理普通内容字段
+                # 处理常规内容
                 if hasattr(delta, 'content') and delta.content:
-                    content = delta.content
-                    buffer += content
+                    result['content'] = delta.content
 
-                    # 推理模型的常规输出
-                    if self.is_reasoning_model and in_reasoning_mode:
-                        # 第一次收到常规内容标志着推理阶段结束
-                        yield {"mode": "thinking_ended", "thinking": reasoning_buffer}
-                        in_reasoning_mode = False
-
-                    # 非推理模型文本检测思维链标签
-                    if not self.is_reasoning_model:
-                        # 检查非推理模型中的<thinking>标签
-                        if "<thinking>" in content and not in_reasoning_mode:
-                            in_reasoning_mode = True
-                            thinking_start_index = buffer.find("<thinking>") + len("<thinking>")
-                            reasoning_buffer = buffer[thinking_start_index:]
-                            # 从用户可见内容中移除thinking开始标记
-                            buffer = buffer[:buffer.find("<thinking>")]
-
-                            # 通知客户端进入推理模式
-                            yield {"mode": "thinking_started"}
-                            continue
-
-                        if in_reasoning_mode and "</thinking>" in content:
-                            in_reasoning_mode = False
-                            thinking_end_index = reasoning_buffer.find("</thinking>")
-                            if thinking_end_index != -1:
-                                thinking_content = reasoning_buffer[:thinking_end_index]
-                                # 更新thinking_buffer移除已处理的内容
-                                reasoning_buffer = ""
-
-                                # 通知客户端推理结束，并发送推理内容
-                                yield {"mode": "thinking_ended", "thinking": thinking_content}
-
-                                # 提取推理之后的内容添加到缓冲区
-                                post_thinking = content[content.find("</thinking>") + len("</thinking>"):]
-                                if post_thinking:
-                                    buffer += post_thinking
-                                    yield {"content": post_thinking}
-                                continue
-
-                        # 处理思维链内部内容
-                        if in_reasoning_mode:
-                            reasoning_buffer += content
-                            yield {"mode": "thinking", "thinking": content}
-                            continue
-
-                    # 正常内容输出
-                    yield {"content": content}
-
-            # 流结束后提取结构化数据
-            extracted_data = self._extract_structured_data(buffer)
-            if extracted_data:
-                if 'suggestions' in extracted_data:
-                    yield {"suggestions": extracted_data['suggestions']}
-                if 'recommendation' in extracted_data:
-                    yield {"recommendation": extracted_data['recommendation']}
+                # 只有当有内容时才返回
+                if result:
+                    yield result
 
         except Exception as e:
             logger.error(f"流式Deepseek调用失败: {str(e)}", exc_info=True)
