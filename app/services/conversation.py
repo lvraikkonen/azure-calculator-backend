@@ -19,6 +19,9 @@ from app.services.intent_analysis import IntentAnalysisService
 from app.services.product import ProductService
 from app.services.llm.context_providers import ProductContextProvider
 
+from celery_tasks.tasks.intent_tasks import analyze_intent
+from celery_tasks.tasks.title_tasks import generate_title
+
 settings = get_settings()
 logger = get_logger(__name__)
 
@@ -141,7 +144,7 @@ class ConversationService:
 
     async def _get_intent_analysis(self, conversation_id: UUID, message: str) -> Dict[str, Any]:
         """
-        获取意图分析结果，如果需要则重新分析
+        获取意图分析结果，如果需要则在后台分析，立即返回基本意图
 
         Args:
             conversation_id: 对话ID
@@ -152,12 +155,17 @@ class ConversationService:
         """
         # 检查是否需要分析
         if await self._should_analyze_intent(conversation_id, message):
-            # 使用专用意图分析服务
-            intent_analysis = await self.intent_analysis_service.analyze_intent(message)
+            # 快速分析基本意图 - 不阻塞主流程
+            basic_intent = self._get_basic_intent(message)
+
+            # 在后台启动详细意图分析
+            analyze_intent.delay(str(conversation_id), message)
+
             # 更新缓存
-            await self._update_intent_cache(conversation_id, message, intent_analysis)
-            logger.info(f"对话 {conversation_id} 的消息进行了意图分析: {intent_analysis.get('intent', '其他')}")
-            return intent_analysis
+            await self._update_intent_cache(conversation_id, message, basic_intent)
+            logger.info(
+                f"对话 {conversation_id} 的消息已提交后台意图分析，临时返回基本意图: {basic_intent.get('intent', '其他')}")
+            return basic_intent
 
         # 从缓存获取
         cache_key = str(conversation_id)
@@ -171,6 +179,37 @@ class ConversationService:
 
         logger.info(f"对话 {conversation_id} 使用缓存的意图分析: {intent_analysis.get('intent', '其他')}")
         return intent_analysis
+
+    def _get_basic_intent(self, message: str) -> Dict[str, Any]:
+        """
+        基于简单规则进行快速意图判断，无需调用LLM
+
+        Args:
+            message: 用户消息
+
+        Returns:
+            Dict[str, Any]: 基本意图分析结果
+        """
+        # 简单规则判断
+        intent = "其他"
+        entities = {}
+
+        # 产品查询相关关键词
+        product_keywords = ["产品", "服务", "方案", "价格", "配置", "对比", "推荐", "费用", "云", "Azure", "成本"]
+        if any(keyword in message for keyword in product_keywords):
+            intent = "产品查询"
+
+        # 技术咨询相关关键词
+        tech_keywords = ["架构", "技术", "实现", "原理", "部署", "开发", "集成", "代码", "API"]
+        if any(keyword in message for keyword in tech_keywords):
+            intent = "技术咨询"
+
+        # 问候或闲聊相关关键词
+        greeting_keywords = ["你好", "嗨", "您好", "早上好", "下午好", "晚上好", "谢谢"]
+        if any(keyword in message for keyword in greeting_keywords) and len(message) < 15:
+            intent = "问候"
+
+        return {"intent": intent, "entities": {}}
 
     async def _generate_conversation_title(self, user_message: str, ai_response: str,
                                            llm_service: BaseLLMService) -> str:
@@ -410,7 +449,7 @@ class ConversationService:
                                              user_message: str,
                                              ai_response: str,
                                              llm_service: BaseLLMService) -> Dict[str, Any]:
-        """更新会话信息，如需要则生成标题"""
+        """更新会话信息，如需要则在后台生成标题"""
         result = {"title_updated": False, "new_title": None}
 
         # 如果没有会话对象，需要获取
@@ -427,17 +466,21 @@ class ConversationService:
         # 检查是否需要生成标题
         if is_new_conversation or conversation.title == "新对话":
             try:
-                new_title = await self._generate_conversation_title(
-                    user_message=user_message,
-                    ai_response=ai_response,
-                    llm_service=llm_service
+                # 在后台异步生成标题，不阻塞当前请求
+                model_type_value = llm_service.model_type.value if hasattr(llm_service, 'model_type') else None
+                model_name = llm_service.model_name if hasattr(llm_service, 'model_name') else None
+
+                generate_title.delay(
+                    str(conversation_id),
+                    user_message,
+                    ai_response,
+                    model_type_value,
+                    model_name
                 )
-                conversation.title = new_title
-                result["title_updated"] = True
-                result["new_title"] = new_title
-                logger.info(f"为对话 {conversation_id} 生成新标题: {new_title}")
+
+                logger.info(f"已提交对话 {conversation_id} 的标题生成任务")
             except Exception as e:
-                logger.error(f"生成标题失败: {str(e)}")
+                logger.error(f"提交标题生成任务失败: {str(e)}")
 
         return result
 
