@@ -1,23 +1,25 @@
 import json
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from uuid import UUID, uuid4
+from uuid import UUID
 from datetime import datetime, timezone
 from app.core.logging import get_logger
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update, delete
 
+from app.core.config import get_settings
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.feedback import Feedback
 from app.schemas.chat import MessageCreate, MessageResponse, ConversationResponse, ConversationSummary
 from app.services.llm.factory import LLMServiceFactory
 from app.services.llm.base import ModelType, ContextProvider, BaseLLMService
+from app.services.intent_analysis import IntentAnalysisService
 from app.services.product import ProductService
 from app.services.llm.context_providers import ProductContextProvider
 
+settings = get_settings()
 logger = get_logger(__name__)
 
 
@@ -30,6 +32,17 @@ class ConversationService:
         self.db = db
         self.llm_factory = llm_factory
         self.product_service = product_service
+
+        # 创建意图分析服务
+        self.intent_analysis_service = IntentAnalysisService(llm_factory)
+
+        # 添加意图缓存
+        self.intent_cache = {}  # 格式: {conversation_id: {"intent": intent, "message_count": count, "last_message": str}}
+        self.intent_cache_enabled = settings.INTENT_CACHE_ENABLED
+        self.intent_cache_ttl = settings.INTENT_CACHE_TTL
+
+        logger.info(
+            f"对话服务初始化，意图缓存: {'已启用' if self.intent_cache_enabled else '已禁用'}, TTL: {self.intent_cache_ttl}")
 
     async def _get_context_providers(self) -> List[ContextProvider]:
         """获取上下文提供者列表"""
@@ -47,6 +60,117 @@ class ConversationService:
         """获取LLM服务实例"""
         model_type_enum = ModelType(model_type) if model_type else None
         return await self.llm_factory.get_service(model_type_enum, model_name)
+
+    async def _should_analyze_intent(self, conversation_id: UUID, message: str) -> bool:
+        """
+        决定是否需要重新分析意图
+
+        Args:
+            conversation_id: 对话ID
+            message: 用户消息内容
+
+        Returns:
+            bool: 是否需要分析意图
+        """
+        # 如果禁用了缓存，始终进行分析
+        if not self.intent_cache_enabled:
+            return True
+
+        # 将UUID转为字符串作为缓存键
+        cache_key = str(conversation_id)
+
+        # 新对话总是分析
+        if cache_key not in self.intent_cache:
+            return True
+
+        # 获取缓存的意图和计数
+        cache_data = self.intent_cache[cache_key]
+        message_count = cache_data.get("message_count", 0)
+        last_message = cache_data.get("last_message", "")
+
+        # 检查是否超过消息阈值
+        if message_count >= self.intent_cache_ttl:
+            return True
+
+        # 消息较长可能是新话题
+        if len(message) > 100:
+            return True
+
+        # 检测话题转换词
+        topic_change_indicators = ["另外", "换个话题", "顺便问一下", "对了", "还有", "新问题", "请问"]
+        if any(indicator in message for indicator in topic_change_indicators):
+            return True
+
+        # 如果与上一条消息差异较大，可能是新话题
+        if last_message and len(message) > 15:
+            # 简单的相似度检测 - 可以未来改进为更复杂的算法
+            common_words = set(message.split()) & set(last_message.split())
+            if len(common_words) < 2:
+                return True
+
+        return False  # 默认不重新分析
+
+    async def _update_intent_cache(self, conversation_id: UUID, message: str, intent_analysis: Dict[str, Any]) -> None:
+        """
+        更新意图缓存
+
+        Args:
+            conversation_id: 对话ID
+            message: 当前消息
+            intent_analysis: 意图分析结果
+        """
+        if not self.intent_cache_enabled:
+            return
+
+        cache_key = str(conversation_id)
+        # 如果之前有缓存，保留计数并增加
+        message_count = 1
+        if cache_key in self.intent_cache:
+            message_count = self.intent_cache[cache_key].get("message_count", 0) + 1
+
+        # 更新缓存
+        self.intent_cache[cache_key] = {
+            "intent": intent_analysis,
+            "message_count": message_count,
+            "last_message": message
+        }
+
+        # 日志记录缓存状态
+        logger.debug(
+            f"更新意图缓存: 对话={cache_key}, 消息计数={message_count}, 意图={intent_analysis.get('intent', '其他')}")
+
+    async def _get_intent_analysis(self, conversation_id: UUID, message: str) -> Dict[str, Any]:
+        """
+        获取意图分析结果，如果需要则重新分析
+
+        Args:
+            conversation_id: 对话ID
+            message: 用户消息
+
+        Returns:
+            Dict[str, Any]: 意图分析结果
+        """
+        # 检查是否需要分析
+        if await self._should_analyze_intent(conversation_id, message):
+            # 使用专用意图分析服务
+            intent_analysis = await self.intent_analysis_service.analyze_intent(message)
+            # 更新缓存
+            await self._update_intent_cache(conversation_id, message, intent_analysis)
+            logger.info(f"对话 {conversation_id} 的消息进行了意图分析: {intent_analysis.get('intent', '其他')}")
+            return intent_analysis
+
+        # 从缓存获取
+        cache_key = str(conversation_id)
+        intent_data = self.intent_cache.get(cache_key, {})
+        intent_analysis = intent_data.get("intent", {"intent": "其他", "entities": {}})
+
+        # 更新消息计数
+        if self.intent_cache_enabled:
+            intent_data["message_count"] = intent_data.get("message_count", 0) + 1
+            self.intent_cache[cache_key] = intent_data
+
+        logger.info(f"对话 {conversation_id} 使用缓存的意图分析: {intent_analysis.get('intent', '其他')}")
+        return intent_analysis
 
     async def _generate_conversation_title(self, user_message: str, ai_response: str,
                                            llm_service: BaseLLMService) -> str:
@@ -119,8 +243,8 @@ class ConversationService:
         conversation = Conversation(
             user_id=user_id,
             title=title,
-            created_at=datetime.now(tz=timezone.utc),
-            updated_at=datetime.now(tz=timezone.utc)
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
 
         self.db.add(conversation)
@@ -252,7 +376,7 @@ class ConversationService:
 
         # 更新标题
         conversation.title = title
-        conversation.updated_at = datetime.now(tz=timezone.utc)
+        conversation.updated_at = datetime.utcnow()
 
         await self.db.commit()
         return True
@@ -321,13 +445,26 @@ class ConversationService:
         # 获取上下文提供者
         context_providers = await self._get_context_providers()
 
+        # 获取意图分析 - 使用意图分析服务
+        intent_analysis = await self._get_intent_analysis(conversation_id, message_create.content)
+        logger.info(f"用户消息意图分析结果: {intent_analysis.get('intent', '其他')}")
+
+        # 构建额外上下文，包含意图分析结果
+        extra_context = message_create.context or {}
+        extra_context["intent_analysis"] = intent_analysis
+
         # 获取LLM服务
         model_type = message_create.context.get("model_type") if message_create.context else None
         model_name = message_create.context.get("model_name") if message_create.context else None
         llm_service = await self._get_llm_service(model_type, model_name)
 
         # 调用LLM获取回复
-        ai_response = await llm_service.chat(message_create.content, history, context_providers)
+        ai_response = await llm_service.chat(
+            message_create.content,
+            history,
+            context_providers,
+            extra_context  # 传递带有意图分析的上下文
+        )
 
         # 构建消息响应
         message_response = MessageResponse(
@@ -437,6 +574,14 @@ class ConversationService:
         # 获取上下文提供者
         context_providers = await self._get_context_providers()
 
+        # 获取意图分析 - 使用意图分析服务
+        intent_analysis = await self._get_intent_analysis(conversation_id, message_create.content)
+        logger.info(f"流式对话用户消息意图分析结果: {intent_analysis.get('intent', '其他')}")
+
+        # 构建额外上下文，包含意图分析结果
+        extra_context = message_create.context or {}
+        extra_context["intent_analysis"] = intent_analysis
+
         # 创建空的AI消息记录占位，稍后更新
         ai_message_id = await self._store_message(
             conversation_id,
@@ -469,7 +614,12 @@ class ConversationService:
 
         try:
             # 从LLM服务获取流式响应
-            async for chunk in llm_service.chat_stream(message_create.content, history, context_providers):
+            async for chunk in llm_service.chat_stream(
+                message_create.content,
+                history,
+                context_providers,
+                extra_context  # 传递带有意图分析的上下文
+            ):
                 # 处理错误情况
                 if 'error' in chunk:
                     yield f"data: {json.dumps({'error': chunk['error'], 'done': True})}\n\n"
@@ -630,7 +780,7 @@ class ConversationService:
             conversation_id=conversation_id,
             content=content,
             sender=sender,
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.utcnow(),
             context=context or {}
         )
         
@@ -693,13 +843,13 @@ class ConversationService:
         if existing_feedback:
             existing_feedback.feedback_type = feedback_type
             existing_feedback.comment = comment
-            existing_feedback.created_at = datetime.now(tz=timezone.utc)
+            existing_feedback.created_at = datetime.utcnow()
         else:
             feedback = Feedback(
                 message_id=message_id,
                 feedback_type=feedback_type,
                 comment=comment,
-                created_at=datetime.now(tz=timezone.utc)
+                created_at=datetime.utcnow()
             )
             self.db.add(feedback)
             

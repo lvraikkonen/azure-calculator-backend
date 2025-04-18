@@ -76,45 +76,20 @@ class DeepseekService(BaseLLMService):
             for msg in messages
         ]
 
-    async def analyze_intent(self, user_input: str) -> Dict[str, Any]:
-        """分析用户意图"""
-        try:
-            # 获取意图分析器提示词
-            system_prompt = prompt_manager.get_intent_analyzer_prompt()
-
-            # 构建分析提示
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input}
-            ]
-
-            # 调用LLM API进行分析
-            response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=500
-            )
-
-            # 解析响应
-            analysis_text = response.choices[0].message.content
-
-            # 提取JSON
-            return self._extract_json_from_text(analysis_text) or {"intent": "其他", "entities": {}}
-
-        except Exception as e:
-            logger.error(f"分析用户输入失败: {str(e)}", exc_info=True)
-            return {"intent": "其他", "entities": {}}
-
     async def chat(self,
                    user_message: str,
                    conversation_history: List[Dict[str, Any]] = None,
-                   context_providers: List[ContextProvider] = None) -> Dict[str, Any]:
+                   context_providers: List[ContextProvider] = None,
+                   extra_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """调用Deepseek进行对话"""
         try:
-            # 首先分析用户意图
-            intent_analysis = await self.analyze_intent(user_message)
+            extra_context = extra_context or {}
+
+            # 使用传入的意图分析，现在必须由调用者提供
+            intent_analysis = extra_context.get("intent_analysis", {"intent": "其他", "entities": {}})
             intent = intent_analysis.get("intent", "其他")
+
+            logger.debug(f"使用意图: {intent}, 来源: 外部预分析")
 
             # 确定上下文特征
             context_features = {
@@ -177,12 +152,17 @@ class DeepseekService(BaseLLMService):
     async def chat_stream(self,
                           user_message: str,
                           conversation_history: List[Dict[str, Any]] = None,
-                          context_providers: List[ContextProvider] = None) -> AsyncGenerator[Dict[str, Any], None]:
+                          context_providers: List[ContextProvider] = None,
+                          extra_context: Dict[str, Any] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """流式调用Deepseek进行对话"""
         try:
-            # 首先分析用户意图
-            intent_analysis = await self.analyze_intent(user_message)
+            extra_context = extra_context or {}
+
+            # 使用传入的意图分析，现在必须由调用者提供
+            intent_analysis = extra_context.get("intent_analysis", {"intent": "其他", "entities": {}})
             intent = intent_analysis.get("intent", "其他")
+
+            logger.debug(f"流式对话使用意图: {intent}, 来源: 外部预分析")
 
             # 确定上下文特征
             context_features = {

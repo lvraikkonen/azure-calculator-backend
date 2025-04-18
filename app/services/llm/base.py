@@ -42,22 +42,40 @@ class BaseLLMService(ABC):
     async def chat(self,
                    user_message: str,
                    conversation_history: List[Dict[str, Any]] = None,
-                   context_providers: List[ContextProvider] = None) -> Dict[str, Any]:
-        """基本对话方法"""
+                   context_providers: List[ContextProvider] = None,
+                   extra_context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        基本对话方法
+
+        Args:
+            user_message: 用户消息
+            conversation_history: 对话历史
+            context_providers: 上下文提供者列表
+            extra_context: 额外上下文信息，如预分析的意图
+
+        Returns:
+            Dict[str, Any]: AI回复数据
+        """
         pass
 
     @abstractmethod
     async def chat_stream(self,
                           user_message: str,
                           conversation_history: List[Dict[str, Any]] = None,
-                          context_providers: List[ContextProvider] = None) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式对话方法"""
-        pass
+                          context_providers: List[ContextProvider] = None,
+                          extra_context: Dict[str, Any] = None) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        流式对话方法
 
-    @abstractmethod
-    async def analyze_intent(self,
-                             user_input: str) -> Dict[str, Any]:
-        """分析用户意图"""
+        Args:
+            user_message: 用户消息
+            conversation_history: 对话历史
+            context_providers: 上下文提供者列表
+            extra_context: 额外上下文信息，如预分析的意图
+
+        Yields:
+            Dict[str, Any]: AI回复数据块
+        """
         pass
 
     @property

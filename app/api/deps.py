@@ -17,6 +17,7 @@ from app.services.product import ProductService
 from app.services.llm.factory import LLMServiceFactory
 from app.services.llm.base import ModelType, BaseLLMService, ContextProvider
 from app.services.llm.context_providers import ProductContextProvider
+from app.services.intent_analysis import IntentAnalysisService
 from app.services.conversation import ConversationService
 from app.rag.services.hybrid_rag_service import HybridRAGService
 from app.rag.services.rag_factory import create_rag_service
@@ -30,7 +31,6 @@ llm_factory = LLMServiceFactory()
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login"
 )
-
 
 async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -91,7 +91,6 @@ async def get_current_user(
         )
     
     return user
-
 
 async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -189,7 +188,6 @@ async def get_llm_factory() -> LLMServiceFactory:
     """
     return llm_factory
 
-
 async def get_llm_service(
         product_service: ProductService = Depends(get_product_service),
         llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory)
@@ -208,6 +206,20 @@ async def get_llm_service(
 
     return service
 
+async def get_intent_analysis_service(
+        llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory)
+) -> IntentAnalysisService:
+    """
+    获取意图分析服务实例
+
+    Args:
+        llm_factory_instance: LLM服务工厂实例
+
+    Returns:
+        IntentAnalysisService: 意图分析服务实例
+    """
+    return IntentAnalysisService(llm_factory_instance)
+
 async def get_conversation_service(
     db: AsyncSession = Depends(get_db),
     llm_factory_instance: LLMServiceFactory = Depends(get_llm_factory),
@@ -217,7 +229,6 @@ async def get_conversation_service(
     获取对话服务实例
     """
     return ConversationService(db, llm_factory_instance, product_service)
-
 
 async def get_model_service(
         model_type: ModelType,

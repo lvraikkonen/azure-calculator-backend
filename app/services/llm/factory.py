@@ -64,7 +64,7 @@ class LLMServiceFactory:
 
         Args:
             model_type: 模型类型枚举
-            model_name: 具体模型名称（如'gpt-4'）
+            model_name: 具体模型名称
             config: 其他配置参数
 
         Returns:
@@ -78,9 +78,9 @@ class LLMServiceFactory:
             if model_type == ModelType.DEEPSEEK:
                 # 检查是否请求了推理能力
                 if config.get("reasoning", False):
-                    model_name = settings.DEEPSEEK_REASONER_MODEL
+                    model_name = settings.DEEPSEEK_R1_MODEL
                 else:
-                    model_name = settings.DEEPSEEK_MODEL
+                    model_name = settings.DEEPSEEK_V3_MODEL
             elif model_type == ModelType.OPENAI:
                 model_name = settings.OPENAI_CHAT_MODEL
             elif model_type == ModelType.ANTHROPIC:
@@ -154,3 +154,30 @@ class LLMServiceFactory:
 
         # 直接调用创建方法
         return await self.create_service(model_type, model_name, config)
+
+    async def get_intent_analyzer_service(self) -> BaseLLMService:
+        """
+        获取专用于意图分析的服务实例
+
+        Returns:
+            BaseLLMService: 意图分析专用的LLM服务实例
+        """
+        model_type = ModelType(settings.INTENT_ANALYSIS_MODEL_TYPE)
+        model_name = settings.INTENT_ANALYSIS_MODEL
+
+        # 构建缓存键
+        cache_key = f"intent_analyzer:{model_type.value}:{model_name}"
+
+        # 检查缓存中是否存在
+        if cache_key in self.service_instances:
+            return self.service_instances[cache_key]
+
+        # 创建新实例 - 使用较低温度优化意图分析
+        config = {"temperature": 0.2}  # 低温度确保更稳定的分类结果
+        service = await self.create_service(model_type, model_name, config)
+
+        # 添加到缓存
+        self.service_instances[cache_key] = service
+
+        logger.info(f"创建意图分析专用服务: {cache_key}")
+        return service
