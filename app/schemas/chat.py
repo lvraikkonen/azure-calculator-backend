@@ -2,6 +2,9 @@ from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID, uuid4
+from app.core.config import get_settings
+
+settings = get_settings()
 
 
 class MessageBase(BaseModel):
@@ -13,6 +16,23 @@ class MessageCreate(MessageBase):
     """创建消息请求模型"""
     conversation_id: Optional[UUID] = Field(None, description="会话ID，如果为None则创建新会话")
     context: Optional[Dict[str, Any]] = Field(default={}, description="消息上下文，如产品数据等")
+    model_type: Optional[str] = None  # 添加直接的模型类型字段
+    model_name: Optional[str] = None  # 添加直接的模型名称字段
+    use_reasoning: Optional[bool] = False  # 是否使用推理能力
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 将模型选择参数添加到context中确保兼容性
+        if self.model_type and "model_type" not in self.context:
+            self.context["model_type"] = self.model_type
+        if self.model_name and "model_name" not in self.context:
+            self.context["model_name"] = self.model_name
+        if self.use_reasoning:
+            self.context["reasoning"] = True
+            # 如果用户请求推理但没指定模型，使用默认推理模型
+            if not self.model_name:
+                self.context["model_name"] = settings.DEEPSEEK_R1_MODEL
+                self.context["model_type"] = "deepseek"
 
 
 class Recommendation(BaseModel):
@@ -101,3 +121,13 @@ class FeedbackResponse(FeedbackCreate):
     """反馈响应模型"""
     id: UUID = Field(..., description="反馈ID")
     created_at: datetime = Field(..., description="创建时间")
+
+
+class ModelInfo(BaseModel):
+    """模型信息模式"""
+    model_type: str
+    model_name: str
+    display_name: str
+    description: str
+    supports_reasoning: bool
+    is_default: bool

@@ -55,8 +55,11 @@ class Settings(BaseSettings):
     # 意图分析专用模型配置
     INTENT_ANALYSIS_MODEL_TYPE: str = Field("deepseek", env="INTENT_ANALYSIS_MODEL_TYPE")
     INTENT_ANALYSIS_MODEL: str = Field("deepseek-chat", env="INTENT_ANALYSIS_MODEL")
-    INTENT_CACHE_TTL: int = Field(10, env="INTENT_CACHE_TTL")  # 意图缓存有效消息数量
-    INTENT_CACHE_ENABLED: bool = Field(True, env="INTENT_CACHE_ENABLED")  # 是否启用意图缓存
+    INTENT_ANALYSIS_TEMPERATURE: float = Field(0.3, env="INTENT_ANALYSIS_TEMPERATURE")  # 新增温度控制
+    INTENT_ANALYSIS_MAX_TOKENS: int = Field(500, env="INTENT_ANALYSIS_MAX_TOKENS")  # 新增token限制
+    INTENT_CACHE_TTL: int = Field(10, env="INTENT_CACHE_TTL")
+    INTENT_CACHE_ENABLED: bool = Field(True, env="INTENT_CACHE_ENABLED")
+    INTENT_SIMILARITY_THRESHOLD: float = Field(0.3, env="INTENT_SIMILARITY_THRESHOLD")  # 新增相似度阈值
 
     # LDAP配置
     LDAP_ENABLED: bool = Field(False, env="LDAP_ENABLED")

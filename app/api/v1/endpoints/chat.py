@@ -4,20 +4,31 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_current_user, get_conversation_service
+from app.api.deps import get_current_user, get_conversation_service, get_llm_factory
 from app.models.user import User
 from app.schemas.chat import (
-    MessageCreate, 
-    MessageResponse, 
-    ConversationResponse, 
+    MessageCreate,
+    MessageResponse,
+    ConversationResponse,
     ConversationSummary,
     ConversationBase,
     FeedbackCreate,
-    FeedbackResponse
+    FeedbackResponse, ModelInfo
 )
 from app.services.conversation import ConversationService
+from app.services.llm.factory import LLMServiceFactory
 
 router = APIRouter()
+
+@router.get("/models/", response_model=List[ModelInfo])
+async def list_available_models(
+    current_user: User = Depends(get_current_user),
+    llm_factory: LLMServiceFactory = Depends(get_llm_factory)
+):
+    """
+    获取可用的LLM模型列表
+    """
+    return await llm_factory.get_available_models()
 
 @router.post("/messages/", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def create_message(

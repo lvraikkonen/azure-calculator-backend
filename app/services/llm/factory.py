@@ -55,6 +55,46 @@ class LLMServiceFactory:
         # 默认特性
         return {"is_reasoning": False}
 
+    async def get_available_models(self) -> List[Dict[str, Any]]:
+        """
+        获取所有可用的模型信息
+
+        Returns:
+            List[Dict[str, Any]]: 模型信息列表
+        """
+        # 定义可用模型
+        models = [
+            {
+                "model_type": "deepseek",
+                "model_name": settings.DEEPSEEK_V3_MODEL,
+                "display_name": "Deepseek Chat",
+                "description": "适合一般对话和推荐任务的基础模型",
+                "supports_reasoning": False,
+                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_V3_MODEL == settings.DEEPSEEK_V3_MODEL
+            },
+            {
+                "model_type": "deepseek",
+                "model_name": settings.DEEPSEEK_R1_MODEL,
+                "display_name": "Deepseek Reasoner",
+                "description": "支持推理能力的高级模型，适合复杂问题分析",
+                "supports_reasoning": True,
+                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_R1_MODEL == settings.DEEPSEEK_R1_MODEL
+            }
+        ]
+
+        # 如果配置了OpenAI模型，也添加到列表中
+        if settings.OPENAI_API_KEY:
+            models.append({
+                "model_type": "openai",
+                "model_name": settings.OPENAI_CHAT_MODEL,
+                "display_name": f"OpenAI {settings.OPENAI_CHAT_MODEL}",
+                "description": "OpenAI的对话模型",
+                "supports_reasoning": False,
+                "is_default": settings.DEFAULT_MODEL_TYPE == "openai"
+            })
+
+        return models
+
     async def create_service(self,
                              model_type: ModelType = None,
                              model_name: str = None,
@@ -172,8 +212,11 @@ class LLMServiceFactory:
         if cache_key in self.service_instances:
             return self.service_instances[cache_key]
 
-        # 创建新实例 - 使用较低温度优化意图分析
-        config = {"temperature": 0.2}  # 低温度确保更稳定的分类结果
+        # 创建新实例 - 使用配置的温度
+        config = {
+            "temperature": settings.INTENT_ANALYSIS_TEMPERATURE,
+            "max_tokens": settings.INTENT_ANALYSIS_MAX_TOKENS
+        }
         service = await self.create_service(model_type, model_name, config)
 
         # 添加到缓存

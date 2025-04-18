@@ -19,19 +19,15 @@ class IntentAnalysisService:
         self.llm_factory = llm_factory
         self.model_type = ModelType(settings.INTENT_ANALYSIS_MODEL_TYPE)
         self.model_name = settings.INTENT_ANALYSIS_MODEL
+        self.temperature = settings.INTENT_ANALYSIS_TEMPERATURE
+        self.max_tokens = settings.INTENT_ANALYSIS_MAX_TOKENS
+        self.similarity_threshold = settings.INTENT_SIMILARITY_THRESHOLD
 
-        logger.info(f"意图分析服务初始化: 模型类型={self.model_type.value}, 模型名称={self.model_name}")
+        logger.info(f"意图分析服务初始化: 模型类型={self.model_type.value}, "
+                   f"模型名称={self.model_name}, 温度={self.temperature}")
 
     async def analyze_intent(self, user_input: str) -> Dict[str, Any]:
-        """
-        分析用户意图
-
-        Args:
-            user_input: 用户输入文本
-
-        Returns:
-            Dict[str, Any]: 意图分析结果，格式为 {"intent": str, "entities": Dict}
-        """
+        """分析用户意图"""
         try:
             # 获取专用的意图分析服务实例
             llm_service = await self.llm_factory.get_intent_analyzer_service()
@@ -46,19 +42,17 @@ class IntentAnalysisService:
                 {"role": "user", "content": user_input}
             ]
 
-            # 调用LLM API进行分析
+            # 调用LLM API进行分析，使用配置的参数
             client = llm_service._client if hasattr(llm_service, '_client') else llm_service.client
             response = await client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                temperature=0.3,
-                max_tokens=500
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
 
             # 解析响应
             analysis_text = response.choices[0].message.content
-
-            # 提取JSON
             return self._extract_json_from_text(analysis_text) or {"intent": "其他", "entities": {}}
 
         except Exception as e:
