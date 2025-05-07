@@ -52,6 +52,12 @@ class Settings(BaseSettings):
 
     DEFAULT_MODEL_TYPE: str = Field("deepseek", env="DEFAULT_MODEL_TYPE")
 
+    API_KEY_ENCRYPTION_KEY: Optional[str] = Field(
+        None,
+        env="API_KEY_ENCRYPTION_KEY",
+        description="用于加密API密钥的Fernet密钥（32字节base64编码）"
+    )
+
     # 意图分析专用模型配置
     INTENT_ANALYSIS_MODEL_TYPE: str = Field("deepseek", env="INTENT_ANALYSIS_MODEL_TYPE")
     INTENT_ANALYSIS_MODEL: str = Field("deepseek-chat", env="INTENT_ANALYSIS_MODEL")

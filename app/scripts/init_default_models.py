@@ -11,6 +11,7 @@ from app.db.session import AsyncSessionLocal
 from app.services.model_management.model_configuration_service import ModelConfigurationService
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.core.security import encrypt_api_key, decrypt_api_key
 
 # 设置日志
 setup_logging()
@@ -28,6 +29,18 @@ async def init_default_models():
         db_session = db
         service = ModelConfigurationService(db_session)
 
+        # 加密API密钥
+        encrypted_api_key = None
+        try:
+            if settings.DEEPSEEK_API_KEY:
+                encrypted_api_key = encrypt_api_key(settings.DEEPSEEK_API_KEY)
+                logger.info("已加密API密钥")
+            else:
+                logger.warning("没有找到DEEPSEEK_API_KEY，将创建没有API密钥的模型配置")
+        except Exception as e:
+            logger.error(f"加密API密钥失败: {str(e)}")
+            encrypted_api_key = None
+
         # 添加deepseek-chat模型
         try:
             deepseek_chat_config = {
@@ -36,7 +49,7 @@ async def init_default_models():
                 "description": "Deepseek的通用对话模型，适合一般问答、创意写作和信息提取任务",
                 "model_type": "deepseek",
                 "model_name": settings.DEEPSEEK_V3_MODEL,
-                "api_key": settings.DEEPSEEK_API_KEY,
+                "api_key": encrypted_api_key,
                 "base_url": settings.DEEPSEEK_API_BASE,
                 "is_custom": False,
                 "is_active": True,
@@ -57,6 +70,16 @@ async def init_default_models():
             model_details = await service.get_model_by_name("deepseek-chat")
             logger.info(f"模型详情: {model_details.name}, 状态: {'激活' if model_details.is_active else '未激活'}")
 
+            # 验证API密钥加密/解密是否正常工作
+            if model_details.api_key:
+                try:
+                    # 尝试解密API密钥（仅在log中显示前4位作为验证）
+                    decrypted_key = decrypt_api_key(model_details.api_key)
+                    masked_key = decrypted_key[:4] + "****" if decrypted_key else None
+                    logger.info(f"API密钥解密验证通过，前缀: {masked_key}")
+                except Exception as e:
+                    logger.error(f"API密钥解密失败: {str(e)}")
+
         except Exception as e:
             logger.error(f"创建deepseek-chat模型时出错: {str(e)}")
 
@@ -68,7 +91,7 @@ async def init_default_models():
                 "description": "Deepseek的推理增强模型，适合复杂推理、问题求解和多步骤分析任务",
                 "model_type": "deepseek",
                 "model_name": settings.DEEPSEEK_R1_MODEL,
-                "api_key": settings.DEEPSEEK_API_KEY,
+                "api_key": encrypted_api_key,
                 "base_url": settings.DEEPSEEK_API_BASE,
                 "is_custom": False,
                 "is_active": True,
