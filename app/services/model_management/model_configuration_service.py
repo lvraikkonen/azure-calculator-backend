@@ -290,40 +290,51 @@ class ModelConfigurationService:
 
         self.db.add(model)
 
-        # 记录价格历史
-        price_history = ModelPriceHistory(
-            model_id=model.id,
-            input_price=input_price,
-            output_price=output_price,
-            currency="USD",
-            effective_date=datetime.utcnow(),
-            changed_by=user_id
-        )
-        self.db.add(price_history)
-
-        # 记录审计日志
-        audit_log = ModelAuditLog(
-            model_id=model.id,
-            action="create",
-            changes_summary=f"创建模型配置: {name}",
-            changes_detail={
-                "name": name,
-                "model_type": model_type,
-                "model_name": model_name,
-                "is_active": is_active,
-                "input_price": input_price,
-                "output_price": output_price
-            },
-            performed_by=user_id,
-            action_date=datetime.utcnow()
-        )
-        self.db.add(audit_log)
-
         try:
+            # 先提交模型，确保有Model ID
             await self.db.commit()
             await self.db.refresh(model)
+
+            # 确保模型ID已生成
+            if not model.id:
+                await self.db.rollback()
+                logger.error("创建模型后未能获取模型ID")
+                raise ValueError("创建模型配置失败: 无法获取模型ID")
+
+            # 记录价格历史
+            price_history = ModelPriceHistory(
+                model_id=model.id,
+                input_price=input_price,
+                output_price=output_price,
+                currency="USD",
+                effective_date=datetime.utcnow(),
+                changed_by=user_id
+            )
+            self.db.add(price_history)
+
+            # 记录审计日志
+            audit_log = ModelAuditLog(
+                model_id=model.id,
+                action="create",
+                changes_summary=f"创建模型配置: {name}",
+                changes_detail={
+                    "name": name,
+                    "model_type": model_type,
+                    "model_name": model_name,
+                    "is_active": is_active,
+                    "input_price": input_price,
+                    "output_price": output_price
+                },
+                performed_by=user_id,
+                action_date=datetime.utcnow()
+            )
+            self.db.add(audit_log)
+
+            # 提交价格历史和审计日志
+            await self.db.commit()
             logger.info(f"成功创建模型配置: {name}")
             return model, True
+
         except IntegrityError as e:
             await self.db.rollback()
             logger.error(f"创建模型配置失败: {str(e)}")

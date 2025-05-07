@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # 用户访问权限基础Schema
@@ -11,7 +11,8 @@ class UserAccessBase(BaseModel):
     model_id: UUID = Field(..., description="模型ID")
     access_level: str = Field("read", description="访问级别: read, write, admin")
 
-    @validator('access_level')
+    @classmethod
+    @field_validator('access_level')
     def validate_access_level(cls, v):
         allowed_levels = ['read', 'write', 'admin']
         if v not in allowed_levels:
@@ -37,7 +38,8 @@ class UserAccessUpdate(BaseModel):
     token_quota: Optional[int] = Field(None, ge=0, description="每日token限制")
     custom_settings: Optional[Dict[str, Any]] = Field(None, description="用户自定义模型设置")
 
-    @validator('access_level')
+    @classmethod
+    @field_validator('access_level')
     def validate_access_level(cls, v):
         if v is not None:
             allowed_levels = ['read', 'write', 'admin']
@@ -66,7 +68,7 @@ class UserAccessResponse(UserAccessBase):
     granted_by_name: Optional[str] = Field(None, description="授权人名称")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 用户访问权限列表响应
@@ -95,7 +97,8 @@ class BatchAccessRequest(BaseModel):
     daily_quota: Optional[int] = Field(None, ge=0, description="每日请求限制")
     token_quota: Optional[int] = Field(None, ge=0, description="每日token限制")
 
-    @validator('access_level')
+    @classmethod
+    @field_validator('access_level')
     def validate_access_level(cls, v):
         allowed_levels = ['read', 'write', 'admin']
         if v not in allowed_levels:

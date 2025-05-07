@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from datetime import datetime, date
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ class TokenUsageData(BaseModel):
 # 日使用量响应
 class DailyUsageResponse(BaseModel):
     """日使用量响应Schema"""
-    date: date = Field(..., description="统计日期")
+    usage_date: date = Field(..., description="统计日期")
     model_id: Optional[UUID] = Field(None, description="模型ID")
     model_name: Optional[str] = Field(None, description="模型名称")
 
@@ -38,7 +38,7 @@ class DailyUsageResponse(BaseModel):
     error_count: int = Field(0, description="错误请求数")
 
     # Token统计
-    tokens: TokenUsageData = Field(..., description="Token使用数据")
+    token_usage: TokenUsageData = Field(..., description="Token使用数据")
 
     # 性能统计
     avg_response_time: Optional[float] = Field(None, description="平均响应时间(ms)")
@@ -48,7 +48,7 @@ class DailyUsageResponse(BaseModel):
     unique_users: int = Field(0, description="唯一用户数")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 小时使用量响应
@@ -64,13 +64,13 @@ class HourlyUsageResponse(BaseModel):
     error_count: int = Field(0, description="错误请求数")
 
     # Token统计
-    tokens: TokenUsageData = Field(..., description="Token使用数据")
+    token_usage: TokenUsageData = Field(..., description="Token使用数据")
 
     # 性能统计
     avg_response_time: Optional[float] = Field(None, description="平均响应时间(ms)")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 使用量摘要响应
@@ -86,7 +86,7 @@ class UsageSummaryResponse(BaseModel):
     success_rate: float = Field(0.0, description="成功率(%)")
 
     # Token统计
-    tokens: TokenUsageData = Field(..., description="Token使用数据")
+    token_usage: TokenUsageData = Field(..., description="Token使用数据")
 
     # 模型分布
     model_distribution: Dict[str, int] = Field(default_factory=dict, description="模型使用分布")
@@ -106,13 +106,13 @@ class UserUsageResponse(BaseModel):
 
     # 使用统计
     total_requests: int = Field(0, description="总请求数")
-    tokens: TokenUsageData = Field(..., description="Token使用数据")
+    token_usage: TokenUsageData = Field(..., description="Token使用数据")
 
     # 模型使用分布
     model_usage: Dict[str, int] = Field(default_factory=dict, description="模型使用分布")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 使用量报表请求

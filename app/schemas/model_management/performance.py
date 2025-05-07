@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # 测试配置基础Schema
@@ -49,7 +49,7 @@ class TestResponse(TestConfigBase):
     tested_by: Optional[UUID] = Field(None, description="测试执行人ID")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 简化的测试结果摘要
@@ -65,7 +65,7 @@ class TestResultSummary(BaseModel):
     test_date: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 测试列表响应
@@ -81,7 +81,7 @@ class TestDetailResponse(TestResponse):
     detailed_results: Optional[Dict[str, Any]] = Field(None, description="详细测试结果")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 速度测试请求
@@ -92,7 +92,8 @@ class SpeedTestRequest(BaseModel):
     test_type: str = Field("standard", description="测试类型")
     prompt: Optional[str] = Field(None, description="测试使用的提示词")
 
-    @validator('test_type')
+    @classmethod
+    @field_validator("test_type")
     def validate_test_type(cls, v):
         allowed_types = ['standard', 'long_context', 'complex_reasoning']
         if v not in allowed_types:

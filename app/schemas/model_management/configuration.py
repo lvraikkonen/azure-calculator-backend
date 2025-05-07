@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # 基础模型配置Schema
@@ -19,7 +19,8 @@ class ModelConfigBase(BaseModel):
     is_visible: Optional[bool] = Field(True, description="是否在用户界面可见")
 
     # 验证方法
-    @validator('model_type')
+    @classmethod
+    @field_validator('model_type')
     def validate_model_type(cls, v):
         allowed_types = ['openai', 'deepseek', 'anthropic', 'azure_openai']
         if v.lower() not in allowed_types:
@@ -96,10 +97,11 @@ class ModelResponse(ModelConfigBase):
     last_used_at: Optional[datetime] = Field(None, description="最后使用时间")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-    @validator('api_key_masked')
-    def mask_api_key(cls, v, values):
+    @classmethod
+    @field_validator('api_key_masked')
+    def mask_api_key(cls, v):
         """掩码处理API密钥，只显示前4位和后4位"""
         if not v:
             return None
@@ -123,7 +125,7 @@ class ModelSummary(BaseModel):
     output_price: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # 模型列表响应
