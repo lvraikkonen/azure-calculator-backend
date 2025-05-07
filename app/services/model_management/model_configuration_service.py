@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.security import encrypt_api_key, decrypt_api_key
 from app.models.model_configuration import ModelConfiguration
 from app.models.model_price_history import ModelPriceHistory
 from app.models.model_audit_log import ModelAuditLog
@@ -262,6 +263,12 @@ class ModelConfigurationService:
             logger.warning(f"模型名称'{name}'已存在，返回现有模型")
             return existing_model, False
 
+        # 加密API密钥
+        encrypted_api_key = None
+        if api_key:
+            encrypted_api_key = encrypt_api_key(api_key)
+            logger.info("已加密API密钥")
+
         # 创建新模型
         model = ModelConfiguration(
             name=name,
@@ -269,7 +276,7 @@ class ModelConfigurationService:
             description=description,
             model_type=model_type,
             model_name=model_name,
-            api_key=api_key,
+            api_key=encrypted_api_key,
             base_url=base_url,
             parameters=parameters or {},
             input_price=input_price,
@@ -413,6 +420,20 @@ class ModelConfigurationService:
         original_values = {}
         changes = {}
 
+        # 检查并处理API密钥加密
+        if 'api_key' in update_data:
+            # 记录变更（不记录实际值，只标记有变更）
+            original_values['api_key'] = "******"
+            changes['api_key'] = "******"
+
+            # 如果提供了非空API密钥，则加密
+            if update_data['api_key']:
+                encrypted_key = encrypt_api_key(update_data['api_key'])
+                update_data['api_key'] = encrypted_key
+            else:
+                # 如果提供了空值，表示用户想要清除API密钥
+                update_data['api_key'] = None
+
         # 检查并更新价格，如果价格有变化，记录价格历史
         price_changed = False
         new_input_price = update_data.get('input_price')
@@ -440,6 +461,9 @@ class ModelConfigurationService:
                 original_values[field] = getattr(model, field)
                 changes[field] = update_data[field]
                 setattr(model, field, update_data[field])
+
+        if 'api_key' in update_data:
+            model.api_key = update_data['api_key']  # 已加密的值
 
         if 'input_price' in update_data:
             model.input_price = update_data['input_price']
@@ -669,13 +693,26 @@ class ModelConfigurationService:
             # 记录开始时间
             start_time = datetime.utcnow()
 
+            # 解密API密钥
+            decrypted_api_key = None
+            if model.api_key:
+                try:
+                    decrypted_api_key = decrypt_api_key(model.api_key)
+                except ValueError as e:
+                    logger.error(f"API密钥解密失败: {str(e)}")
+                    return ModelTestResponse(
+                        success=False,
+                        message="API密钥解密失败，请检查密钥配置",
+                        error="API密钥解密失败"
+                    )
+
             # 通过LLM工厂创建服务实例
             model_type_enum = ModelType(model.model_type)
             llm_service = await llm_factory.create_service(
                 model_type=model_type_enum,
                 model_name=model.model_name,
                 config={
-                    "api_key": model.api_key,
+                    "api_key": decrypted_api_key,
                     "base_url": model.base_url
                 }
             )
