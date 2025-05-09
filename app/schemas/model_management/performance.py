@@ -78,10 +78,23 @@ class TestListResponse(BaseModel):
 # 测试详情响应
 class TestDetailResponse(TestResponse):
     """测试详情响应Schema"""
+    input_tokens: Optional[int] = Field(None, description="平均输入token数")
+    output_tokens: Optional[int] = Field(None, description="平均输出token数")
+    tokens_per_second: Optional[float] = Field(None, description="平均token生成速度(tokens/sec)")
+    input_cost: Optional[float] = Field(None, description="输入token成本")
+    output_cost: Optional[float] = Field(None, description="输出token成本")
+    total_cost: Optional[float] = Field(None, description="总成本")
     detailed_results: Optional[Dict[str, Any]] = Field(None, description="详细测试结果")
 
     class Config:
         from_attributes = True
+
+    @property
+    def total_tokens(self) -> Optional[int]:
+        """总token数"""
+        if self.input_tokens is not None and self.output_tokens is not None:
+            return self.input_tokens + self.output_tokens
+        return None
 
 
 # 速度测试请求
