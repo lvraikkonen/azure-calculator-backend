@@ -8,7 +8,7 @@ project_root = Path(__file__).parent.parent.absolute()
 sys.path.append(str(project_root))
 
 from app.db.session import AsyncSessionLocal
-from app.services.model_management.model_configuration_service import ModelConfigurationService
+from app.services.model_management.model_configuration_service import ModelConfigurationService, ModelEventPublisher
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 
@@ -26,7 +26,9 @@ async def init_default_models():
 
     async with AsyncSessionLocal() as db:
         db_session = db
-        service = ModelConfigurationService(db_session)
+        # 创建禁用事件发布的服务实例
+        event_publisher = ModelEventPublisher(enabled=False)
+        service = ModelConfigurationService(db_session, event_publisher=event_publisher)
 
         # 添加deepseek-chat模型
         try:

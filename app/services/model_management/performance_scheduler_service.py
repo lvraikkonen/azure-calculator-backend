@@ -5,7 +5,7 @@
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
-from croniter import croniter
+# from croniter import croniter
 
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -173,15 +173,15 @@ class PerformanceSchedulerService:
                 next_run = now + timedelta(hours=1)
             return next_run
             
-        elif schedule_type == "cron":
-            if not cron_expression:
-                raise ValueError("Cron调度需要提供cron_expression")
+        # elif schedule_type == "cron":
+        #     if not cron_expression:
+        #         raise ValueError("Cron调度需要提供cron_expression")
             
-            try:
-                cron = croniter(cron_expression, now)
-                return cron.get_next(datetime)
-            except Exception as e:
-                raise ValueError(f"无效的Cron表达式: {cron_expression}, 错误: {str(e)}")
+        #     try:
+        #         cron = croniter(cron_expression, now)
+        #         return cron.get_next(datetime)
+        #     except Exception as e:
+        #         raise ValueError(f"无效的Cron表达式: {cron_expression}, 错误: {str(e)}")
         
         else:
             raise ValueError(f"不支持的调度类型: {schedule_type}")

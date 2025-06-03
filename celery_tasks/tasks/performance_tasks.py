@@ -3,19 +3,16 @@
 """
 
 import asyncio
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from celery import current_task
-from celery.exceptions import Retry
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.session import AsyncSessionLocal
-from app.models.model_performance_test import ModelPerformanceTest
 from app.models.model_configuration import ModelConfiguration
 from app.services.model_management.model_performance_service import ModelPerformanceService
 from app.services.llm.factory import LLMServiceFactory
@@ -82,12 +79,12 @@ def run_performance_test(self, test_request_data: Dict[str, Any], test_type: str
             meta={
                 'status': 'completed',
                 'progress': 100,
-                'result': result.dict() if hasattr(result, 'dict') else result
+                'result': result.model_dump() if hasattr(result, 'model_dump') else result
             }
         )
         
         logger.info(f"性能测试任务完成: {current_task.request.id}")
-        return result.dict() if hasattr(result, 'dict') else result
+        return result.model_dump() if hasattr(result, 'model_dump') else result
         
     except Exception as e:
         logger.error(f"性能测试任务失败: {str(e)}", exc_info=True)
@@ -152,12 +149,12 @@ def run_batch_performance_test(self, batch_request_data: Dict[str, Any]):
             meta={
                 'status': 'completed',
                 'progress': 100,
-                'result': result.dict() if hasattr(result, 'dict') else result
+                'result': result.model_dump() if hasattr(result, 'model_dump') else result
             }
         )
         
         logger.info(f"批量性能测试任务完成: {current_task.request.id}")
-        return result.dict() if hasattr(result, 'dict') else result
+        return result.model_dump() if hasattr(result, 'model_dump') else result
         
     except Exception as e:
         logger.error(f"批量性能测试任务失败: {str(e)}", exc_info=True)
@@ -227,7 +224,7 @@ def scheduled_performance_test(schedule_config: Dict[str, Any]):
                         results.append({
                             "model_id": str(model_id),
                             "status": "success",
-                            "result": result.dict() if hasattr(result, 'dict') else result
+                            "result": result.model_dump() if hasattr(result, 'model_dump') else result
                         })
                         
                     except Exception as e:
@@ -328,3 +325,151 @@ def send_test_notification(notification_type: str, schedule_config: Dict[str, An
     except Exception as e:
         logger.error(f"发送通知失败: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
+
+@celery_app.task(name="run_model_benchmark", bind=True, max_retries=2)
+def run_model_benchmark(self, model_id: str, benchmark_config: Optional[Dict[str, Any]] = None):
+    """
+    运行模型基准测试任务（为ModelConfigurationService提供）
+
+    Args:
+        model_id: 模型ID字符串
+        benchmark_config: 可选的基准测试配置
+
+    Returns:
+        Dict: 基准测试结果
+    """
+    try:
+        logger.info(f"开始模型基准测试: {model_id}")
+
+        # 更新任务状态
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'status': 'initializing',
+                'progress': 10,
+                'model_id': model_id
+            }
+        )
+
+        async def _execute_benchmark():
+            async with AsyncSessionLocal() as session:
+                # 创建服务实例
+                performance_service = ModelPerformanceService(session)
+                llm_factory = LLMServiceFactory()
+
+                try:
+                    # 更新进度
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'status': 'preparing',
+                            'progress': 30,
+                            'model_id': model_id
+                        }
+                    )
+
+                    # 获取模型配置
+                    model_uuid = UUID(model_id)
+                    model_query = select(ModelConfiguration).where(ModelConfiguration.id == model_uuid)
+                    result = await session.execute(model_query)
+                    model = result.scalar_one_or_none()
+
+                    if not model:
+                        raise ValueError(f"模型未找到: {model_id}")
+
+                    # 更新进度
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'status': 'testing',
+                            'progress': 50,
+                            'model_id': model_id
+                        }
+                    )
+
+                    # 创建基准测试请求
+                    config = benchmark_config or {}
+                    test_request_data = {
+                        "model_id": model_uuid,
+                        "test_type": config.get("test_type", "standard"),
+                        "rounds": config.get("rounds", 5),
+                        "prompt": config.get("prompt", "请简要介绍人工智能的发展历程。"),
+                        "max_tokens": config.get("max_tokens", 500),
+                        "temperature": config.get("temperature", 0.7)
+                    }
+
+                    # 执行标准性能测试
+                    request = SpeedTestRequest(**test_request_data)
+                    test_result = await performance_service.run_standard_test(request, llm_factory)
+
+                    # 更新进度
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'status': 'finalizing',
+                            'progress': 90,
+                            'model_id': model_id
+                        }
+                    )
+
+                    # 格式化结果
+                    benchmark_result = {
+                        'model_id': model_id,
+                        'model_name': model.name,
+                        'test_type': 'benchmark',
+                        'avg_response_time': test_result.avg_response_time,
+                        'min_response_time': test_result.min_response_time,
+                        'max_response_time': test_result.max_response_time,
+                        'throughput': test_result.throughput,
+                        'success_rate': test_result.success_rate,
+                        'total_requests': test_result.total_requests,
+                        'failed_requests': test_result.failed_requests,
+                        'test_duration': test_result.test_duration,
+                        'tokens_per_second': getattr(test_result, 'tokens_per_second', None),
+                        'tested_at': datetime.now(timezone.utc).isoformat(),
+                        'config': config
+                    }
+
+                    return benchmark_result
+
+                except Exception as e:
+                    logger.error(f"基准测试执行失败: {str(e)}", exc_info=True)
+                    raise
+
+        # 执行异步基准测试
+        result = asyncio.run(_execute_benchmark())
+
+        # 更新任务状态为完成
+        self.update_state(
+            state='SUCCESS',
+            meta={
+                'status': 'completed',
+                'progress': 100,
+                'result': result
+            }
+        )
+
+        logger.info(f"模型基准测试完成: {model_id}")
+        return result
+
+    except Exception as e:
+        logger.error(f"模型基准测试任务失败: {str(e)}", exc_info=True)
+
+        # 重试逻辑
+        if self.request.retries < self.max_retries:
+            logger.info(f"重试模型基准测试 (第 {self.request.retries + 1} 次)")
+            raise self.retry(countdown=120 * (2 ** self.request.retries))
+
+        # 更新任务状态为失败
+        self.update_state(
+            state='FAILURE',
+            meta={
+                'status': 'failed',
+                'error': str(e),
+                'progress': 0,
+                'model_id': model_id
+            }
+        )
+
+        return {"status": "error", "message": str(e), "model_id": model_id}
