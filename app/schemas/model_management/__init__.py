@@ -8,7 +8,8 @@ from app.schemas.model_management.configuration import (
 from app.schemas.model_management.performance import (
     TestConfigBase, TestCreate, TestUpdate, TestResponse,
     TestResultSummary, TestListResponse, TestDetailResponse,
-    SpeedTestRequest, LatencyTestRequest
+    SpeedTestRequest, LatencyTestRequest, BatchTestRequest, BatchTestResponse,
+    TestComparisonRequest, TestComparisonResponse
 )
 
 # 使用统计schemas
@@ -33,7 +34,8 @@ __all__ = [
     # 性能测试schemas
     'TestConfigBase', 'TestCreate', 'TestUpdate', 'TestResponse',
     'TestResultSummary', 'TestListResponse', 'TestDetailResponse',
-    'SpeedTestRequest', 'LatencyTestRequest',
+    'SpeedTestRequest', 'LatencyTestRequest', 'BatchTestRequest', 'BatchTestResponse',
+    'TestComparisonRequest', 'TestComparisonResponse',
 
     # 使用统计schemas
     'UsageQueryParams', 'DailyUsageResponse', 'HourlyUsageResponse',

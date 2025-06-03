@@ -11,7 +11,8 @@ celery_app = Celery(
     include=[
         "celery_tasks.tasks.intent_tasks",
         "celery_tasks.tasks.title_tasks",
-        "celery_tasks.tasks.log_tasks"
+        "celery_tasks.tasks.log_tasks",
+        "celery_tasks.tasks.performance_tasks"
     ]
 )
 
