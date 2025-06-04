@@ -1,4 +1,5 @@
 from typing import Any, List
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_active_superuser, get_role_service
@@ -146,7 +147,7 @@ async def delete_role(
 @router.post("/{role_id}/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def assign_role_to_user(
     role_id: int,
-    user_id: int,
+    user_id: UUID,
     role_service: RoleService = Depends(get_role_service),
     current_user: User = Depends(get_current_active_superuser)
 ) -> None:  # 明确返回None
@@ -159,25 +160,25 @@ async def assign_role_to_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="角色不存在"
         )
-    
+
     success = await role_service.assign_role_to_user(role, user_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="分配角色失败，用户可能不存在"
         )
-    
+
     await async_log_user_operation(
         user=current_user.username,
         action="分配角色给用户",
-        details={"role_id": role_id, "role_name": role.name, "user_id": user_id},
+        details={"role_id": role_id, "role_name": role.name, "user_id": str(user_id)},
     )
 
 
 @router.delete("/{role_id}/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_role_from_user(
     role_id: int,
-    user_id: int,
+    user_id: UUID,
     role_service: RoleService = Depends(get_role_service),
     current_user: User = Depends(get_current_active_superuser)
 ) -> None:  # 明确返回None
@@ -190,16 +191,16 @@ async def remove_role_from_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="角色不存在"
         )
-    
+
     success = await role_service.remove_role_from_user(role, user_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="移除角色失败，用户可能不存在或没有此角色"
         )
-    
+
     await async_log_user_operation(
         user=current_user.username,
         action="从用户移除角色",
-        details={"role_id": role_id, "role_name": role.name, "user_id": user_id},
+        details={"role_id": role_id, "role_name": role.name, "user_id": str(user_id)},
     )

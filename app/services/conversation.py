@@ -325,9 +325,7 @@ class ConversationService:
         """
         conversation = Conversation(
             user_id=user_id,
-            title=title,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            title=title
         )
 
         self.db.add(conversation)
@@ -505,7 +503,7 @@ class ConversationService:
                 return result
 
         # 更新对话时间
-        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.updated_at = datetime.now()
 
         # 检查是否需要生成标题
         if is_new_conversation or conversation.title == "新对话":
@@ -886,7 +884,6 @@ class ConversationService:
             conversation_id=conversation_id,
             content=content,
             sender=sender,
-            timestamp=datetime.now(timezone.utc),
             context=context or {}
         )
         

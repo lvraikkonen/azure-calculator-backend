@@ -66,7 +66,7 @@ class MessageResponse(MessageBase):
     id: Optional[UUID] = Field(default_factory=uuid4, description="消息ID")
     conversation_id: Optional[UUID] = Field(None, description="会话ID")
     sender: str = Field(..., description="发送者，'user' 或 'ai'")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="消息时间戳")
+    timestamp: datetime = Field(default_factory=datetime.now, description="消息时间戳")
     suggestions: Optional[List[str]] = Field(default=[], description="下一步建议列表")
     recommendation: Optional[Recommendation] = Field(None, description="产品推荐")
     thinking: Optional[str] = None

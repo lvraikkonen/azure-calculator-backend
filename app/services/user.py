@@ -1,5 +1,6 @@
 from typing import List, Optional
 import logging
+from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,13 +18,13 @@ class UserService:
         """初始化用户服务"""
         self.db = db
     
-    async def get_user_by_id(self, user_id: int) -> Optional[User]:
+    async def get_user_by_id(self, user_id: UUID) -> Optional[User]:
         """
         通过ID获取用户
-        
+
         Args:
             user_id: 用户ID
-            
+
         Returns:
             Optional[User]: 如果找到用户则返回，否则返回None
         """
@@ -110,14 +111,14 @@ class UserService:
         logger.info(f"创建新用户: {db_user.username}")
         return db_user
     
-    async def update_user(self, user_id: int, user_in: UserUpdate) -> Optional[User]:
+    async def update_user(self, user_id: UUID, user_in: UserUpdate) -> Optional[User]:
         """
         更新用户
-        
+
         Args:
             user_id: 用户ID
             user_in: 用户更新数据
-            
+
         Returns:
             Optional[User]: 如果找到并更新用户则返回，否则返回None
         """
@@ -126,14 +127,14 @@ class UserService:
         if not user:
             logger.warning(f"尝试更新不存在的用户: ID={user_id}")
             return None
-        
+
         # 准备更新数据
         update_data = user_in.model_dump(exclude_unset=True)
-        
+
         # 如果提供了密码，则对其进行哈希处理
         if "password" in update_data:
             update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
-        
+
         # 更新用户
         await self.db.execute(
             update(User)
@@ -141,9 +142,9 @@ class UserService:
             .values(**update_data)
         )
         await self.db.commit()
-        
+
         logger.info(f"更新用户: ID={user_id}, 用户名={user.username}")
-        
+
         # 刷新用户
         return await self.get_user_by_id(user_id)
     
@@ -194,13 +195,13 @@ class UserService:
         """
         return user.is_superuser
     
-    async def delete_user(self, user_id: int) -> bool:
+    async def delete_user(self, user_id: UUID) -> bool:
         """
         删除用户
-        
+
         Args:
             user_id: 要删除的用户ID
-            
+
         Returns:
             bool: 如果成功删除，则为True，否则为False
         """
@@ -209,12 +210,12 @@ class UserService:
         if not user:
             logger.warning(f"尝试删除不存在的用户: ID={user_id}")
             return False
-        
+
         username = user.username
-        
+
         # 从数据库中删除
         await self.db.delete(user)
         await self.db.commit()
-        
+
         logger.info(f"删除用户: ID={user_id}, 用户名={username}")
         return True

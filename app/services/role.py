@@ -1,5 +1,6 @@
 from typing import List, Optional, Union
 import logging
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -148,59 +149,59 @@ class RoleService:
         logger.info(f"删除角色: {role_name}")
         return True
     
-    async def assign_role_to_user(self, role: Role, user_id: int) -> bool:
+    async def assign_role_to_user(self, role: Role, user_id: UUID) -> bool:
         """
         为用户分配角色
-        
+
         Args:
             role: 角色对象
             user_id: 用户ID
-            
+
         Returns:
             bool: 是否成功分配
         """
         from app.models.user import User
-        
+
         # 获取用户
         user = await self.db.get(User, user_id)
         if not user:
             logger.warning(f"尝试为不存在的用户分配角色: user_id={user_id}")
             return False
-        
+
         # 分配角色
         role.users.append(user)
         await self.db.commit()
-        
+
         logger.info(f"为用户({user.username})分配角色: {role.name}")
         return True
     
-    async def remove_role_from_user(self, role: Role, user_id: int) -> bool:
+    async def remove_role_from_user(self, role: Role, user_id: UUID) -> bool:
         """
         从用户移除角色
-        
+
         Args:
             role: 角色对象
             user_id: 用户ID
-            
+
         Returns:
             bool: 是否成功移除
         """
         from app.models.user import User
-        
+
         # 获取用户
         user = await self.db.get(User, user_id)
         if not user:
             logger.warning(f"尝试从不存在的用户移除角色: user_id={user_id}")
             return False
-        
+
         # 检查用户是否有此角色
         if user not in role.users:
             logger.warning(f"用户({user.username})没有角色: {role.name}")
             return False
-        
+
         # 移除角色
         role.users.remove(user)
         await self.db.commit()
-        
+
         logger.info(f"从用户({user.username})移除角色: {role.name}")
         return True
