@@ -147,20 +147,24 @@ async def list_model_performance_tests(
             offset=offset
         )
         
-        # 转换为摘要格式
-        test_summaries = [
-            TestResultSummary(
+        # 转换为摘要格式，并获取模型名称
+        test_summaries = []
+        for test in tests:
+            # 获取模型配置以获取模型名称
+            model_config = await performance_service._get_model_config(test.model_id)
+            model_name = model_config.display_name if model_config else "未知模型"
+
+            test_summary = TestResultSummary(
                 id=test.id,
                 test_name=test.test_name,
                 test_type=test.test_type,
                 model_id=test.model_id,
-                model_name="模型名称",  # TODO: 从模型配置获取
+                model_name=model_name,
                 avg_response_time=test.avg_response_time,
                 success_rate=test.success_rate,
                 test_date=test.test_date
             )
-            for test in tests
-        ]
+            test_summaries.append(test_summary)
         
         return TestListResponse(
             total=total,
@@ -264,20 +268,24 @@ async def list_all_performance_tests(
             offset=offset
         )
         
-        # 转换为摘要格式
-        test_summaries = [
-            TestResultSummary(
+        # 转换为摘要格式，并获取模型名称
+        test_summaries = []
+        for test in tests:
+            # 获取模型配置以获取模型名称
+            model_config = await performance_service._get_model_config(test.model_id)
+            model_name = model_config.display_name if model_config else "未知模型"
+
+            test_summary = TestResultSummary(
                 id=test.id,
                 test_name=test.test_name,
                 test_type=test.test_type,
                 model_id=test.model_id,
-                model_name="模型名称",  # TODO: 从模型配置获取
+                model_name=model_name,
                 avg_response_time=test.avg_response_time,
                 success_rate=test.success_rate,
                 test_date=test.test_date
             )
-            for test in tests
-        ]
+            test_summaries.append(test_summary)
         
         return TestListResponse(
             total=total,

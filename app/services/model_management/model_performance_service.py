@@ -3,10 +3,7 @@ import uuid
 import statistics
 import asyncio
 from time import perf_counter_ns
-from typing import Dict, Any, List, Optional, Tuple, Union
-from functools import lru_cache
-from contextlib import asynccontextmanager
-import json
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 
 from sqlalchemy import select, func
@@ -508,13 +505,17 @@ class ModelPerformanceService:
         Returns:
             ModelPerformanceTest: 创建的测试记录
         """
+        # 使用timezone-naive datetime以兼容数据库的TIMESTAMP WITHOUT TIME ZONE
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
         test_record = ModelPerformanceTest(
             model_id=test_data.model_id,
             test_name=test_data.test_name,
             test_type=test_data.test_type,
             rounds=test_data.rounds,
             test_params=test_data.test_params,
-            test_date=datetime.utcnow()
+            test_date=current_time,
+            created_at=current_time,
+            updated_at=current_time
         )
 
         self.db.add(test_record)
@@ -609,15 +610,24 @@ class ModelPerformanceService:
             if field in results:
                 setattr(test_record, field, results[field])
 
-        # 更新token统计字段，新字段需要放入detailed_results
-        token_fields = {
-            "avg_input_tokens": "avg_input_tokens",
-            "avg_output_tokens": "avg_output_tokens",
-            "total_input_tokens": "total_input_tokens",
-            "total_output_tokens": "total_output_tokens",
-            "avg_tokens_per_second": "avg_throughput",
-            "input_cost": "input_cost",
-            "output_cost": "output_cost",
+        # 更新测试状态
+        if "status" in results:
+            test_record.status = results["status"]
+        elif "success_rate" in results:
+            # 根据成功率自动设置状态
+            success_rate = results["success_rate"]
+            if success_rate == 0:
+                test_record.status = TestStatus.FAILED.value
+            elif success_rate == 100:
+                test_record.status = TestStatus.COMPLETED.value
+            else:
+                test_record.status = TestStatus.COMPLETED.value  # 部分成功也算完成
+
+        # 更新token统计字段到数据库
+        token_fields_mapping = {
+            "total_tokens": "total_tokens",
+            "total_input_tokens": "input_tokens",
+            "total_output_tokens": "output_tokens",
             "total_cost": "total_cost"
         }
 
@@ -625,13 +635,23 @@ class ModelPerformanceService:
         detailed_results = test_record.detailed_results or {}
         additional_results = {}
 
-        # 将token统计数据存储到详细结果中
-        for key, db_field in token_fields.items():
-            if key in results:
+        # 将token统计数据存储到数据库字段中
+        for result_key, db_field in token_fields_mapping.items():
+            if result_key in results:
                 if hasattr(test_record, db_field):
-                    setattr(test_record, db_field, results[key])
+                    setattr(test_record, db_field, results[result_key])
                 else:
-                    additional_results[key] = results[key]
+                    additional_results[result_key] = results[result_key]
+
+        # 将其他token相关数据存储到详细结果中
+        token_detail_fields = [
+            "avg_input_tokens", "avg_output_tokens", "avg_tokens_per_second",
+            "input_cost", "output_cost"
+        ]
+
+        for field in token_detail_fields:
+            if field in results:
+                additional_results[field] = results[field]
 
         # 如果提供了详细结果，合并
         if "detailed_results" in results:
@@ -644,8 +664,10 @@ class ModelPerformanceService:
         # 更新详细结果字段
         test_record.detailed_results = detailed_results
 
-        # 更新时间戳
-        test_record.test_date = datetime.utcnow()
+        # 更新时间戳 - 使用timezone-naive datetime以兼容数据库
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        test_record.test_date = current_time
+        test_record.updated_at = current_time
 
         await self.db.commit()
         await self.db.refresh(test_record)
@@ -668,14 +690,15 @@ class ModelPerformanceService:
             TestResponse: 测试结果
         """
         # 首先创建测试记录
+        current_time = datetime.now(timezone.utc)
         test_data = TestCreate(
             model_id=request.model_id,
-            test_name=f"标准测试 - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            test_name=f"标准测试 - {current_time.strftime('%Y-%m-%d %H:%M')}",
             test_type=request.test_type,
             rounds=request.rounds,
             test_params={
                 "prompt": request.prompt or PerformanceTestConfig.DEFAULT_PROMPTS[0],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": current_time.isoformat()
             }
         )
 
@@ -748,12 +771,13 @@ class ModelPerformanceService:
             await self.update_test_results(
                 test_id=test_record.id,
                 results={
+                    "status": TestStatus.FAILED.value,
                     "success_rate": 0,
                     "error_rate": 100,
                     "detailed_results": {
                         "error": str(e),
                         "status": "failed",
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     }
                 }
             )
@@ -800,6 +824,10 @@ class ModelPerformanceService:
         progress = TestProgress(test_record.id, rounds)
         self._test_progress[str(test_record.id)] = progress
         progress.start_test()
+
+        # 更新数据库中的测试状态为运行中
+        test_record.status = TestStatus.RUNNING.value
+        await self.db.commit()
 
         # 获取模型配置
         model_config = await self._get_model_config(test_record.model_id)
@@ -874,11 +902,17 @@ class ModelPerformanceService:
         # 计算统计数据
         results = self._calculate_test_statistics(round_results)
 
-        # 计算总成本
+        # 计算总成本和token统计
         if model_config and round_results:
             total_input_tokens = sum(r.get("input_tokens", 0) for r in round_results)
             total_output_tokens = sum(r.get("output_tokens", 0) for r in round_results)
 
+            # 添加token统计到结果中
+            results["total_input_tokens"] = total_input_tokens
+            results["total_output_tokens"] = total_output_tokens
+            results["total_tokens"] = total_input_tokens + total_output_tokens
+
+            # 计算成本
             input_cost = (total_input_tokens * model_config.input_price) / 1000000
             output_cost = (total_output_tokens * model_config.output_price) / 1000000
             results["input_cost"] = input_cost
@@ -924,14 +958,15 @@ class ModelPerformanceService:
             TestResponse: 测试结果
         """
         # 首先创建测试记录
+        current_time = datetime.now(timezone.utc)
         test_data = TestCreate(
             model_id=request.model_id,
-            test_name=f"延迟测试 - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            test_name=f"延迟测试 - {current_time.strftime('%Y-%m-%d %H:%M')}",
             test_type="latency",
             rounds=request.rounds,
             test_params={
                 "measure_first_token": request.measure_first_token,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": current_time.isoformat()
             }
         )
 
@@ -1002,12 +1037,13 @@ class ModelPerformanceService:
             await self.update_test_results(
                 test_id=test_record.id,
                 results={
+                    "status": TestStatus.FAILED.value,
                     "success_rate": 0,
                     "error_rate": 100,
                     "detailed_results": {
                         "error": str(e),
                         "status": "failed",
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     }
                 }
             )
@@ -1463,7 +1499,7 @@ class ModelPerformanceService:
             tests=test_details,
             metrics_comparison=metrics_comparison,
             summary=summary,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None)
         )
 
     async def get_best_performing_models(
