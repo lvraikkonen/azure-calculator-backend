@@ -1465,3 +1465,222 @@ class ModelPerformanceService:
             summary=summary,
             created_at=datetime.utcnow()
         )
+
+    async def get_best_performing_models(
+        self,
+        task_type: Optional[str] = None,
+        metric: str = "avg_response_time",
+        limit: int = 5,
+        min_success_rate: float = 90.0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取最佳性能模型列表
+
+        Args:
+            task_type: 任务类型筛选
+            metric: 排序指标 (avg_response_time, tokens_per_second, success_rate, total_cost)
+            limit: 返回数量限制
+            min_success_rate: 最小成功率要求
+
+        Returns:
+            List[Dict[str, Any]]: 按性能排序的模型列表
+        """
+        try:
+            # 构建查询
+            query = select(ModelPerformanceTest).where(
+                ModelPerformanceTest.status == "completed",
+                ModelPerformanceTest.success_rate >= min_success_rate
+            )
+
+            # 按任务类型筛选
+            if task_type:
+                query = query.where(ModelPerformanceTest.test_type == task_type)
+
+            # 执行查询
+            result = await self.db.execute(query)
+            tests = result.scalars().all()
+
+            if not tests:
+                logger.warning(f"没有找到符合条件的测试结果")
+                return []
+
+            # 按模型ID分组，计算平均性能
+            model_performance = {}
+            for test in tests:
+                model_id = str(test.model_id)
+
+                if model_id not in model_performance:
+                    model_performance[model_id] = {
+                        "model_id": model_id,
+                        "test_count": 0,
+                        "avg_response_time": [],
+                        "avg_first_token_time": [],
+                        "tokens_per_second": [],
+                        "success_rate": [],
+                        "total_cost": [],
+                        "latest_test_date": test.test_date
+                    }
+
+                perf = model_performance[model_id]
+                perf["test_count"] += 1
+
+                # 收集指标数据
+                if test.avg_response_time:
+                    perf["avg_response_time"].append(test.avg_response_time)
+                if test.avg_first_token_time:
+                    perf["avg_first_token_time"].append(test.avg_first_token_time)
+                if test.tokens_per_second:
+                    perf["tokens_per_second"].append(test.tokens_per_second)
+                if test.success_rate:
+                    perf["success_rate"].append(test.success_rate)
+                if test.total_cost:
+                    perf["total_cost"].append(test.total_cost)
+
+                # 更新最新测试时间
+                if test.created_at > perf["latest_test_date"]:
+                    perf["latest_test_date"] = test.created_at
+
+            # 计算平均值并排序
+            model_rankings = []
+            for model_id, perf in model_performance.items():
+                ranking = {
+                    "model_id": model_id,
+                    "test_count": perf["test_count"],
+                    "latest_test_date": perf["latest_test_date"],
+                    "avg_response_time": statistics.mean(perf["avg_response_time"]) if perf["avg_response_time"] else None,
+                    "avg_first_token_time": statistics.mean(perf["avg_first_token_time"]) if perf["avg_first_token_time"] else None,
+                    "tokens_per_second": statistics.mean(perf["tokens_per_second"]) if perf["tokens_per_second"] else None,
+                    "success_rate": statistics.mean(perf["success_rate"]) if perf["success_rate"] else None,
+                    "total_cost": statistics.mean(perf["total_cost"]) if perf["total_cost"] else None
+                }
+                model_rankings.append(ranking)
+
+            # 根据指标排序
+            if metric in ["avg_response_time", "avg_first_token_time", "total_cost"]:
+                # 越小越好的指标
+                model_rankings.sort(key=lambda x: x.get(metric) or float('inf'))
+            else:
+                # 越大越好的指标
+                model_rankings.sort(key=lambda x: x.get(metric) or 0, reverse=True)
+
+            # 限制返回数量
+            return model_rankings[:limit]
+
+        except Exception as e:
+            logger.error(f"获取最佳性能模型失败: {str(e)}")
+            return []
+
+    async def get_model_performance_summary(self, model_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+        """
+        获取模型性能摘要
+
+        Args:
+            model_id: 模型ID
+
+        Returns:
+            Optional[Dict[str, Any]]: 性能摘要
+        """
+        try:
+            # 获取该模型的所有完成测试
+            query = select(ModelPerformanceTest).where(
+                ModelPerformanceTest.model_id == model_id,
+                ModelPerformanceTest.status == "completed"
+            ).order_by(ModelPerformanceTest.created_at.desc())
+
+            result = await self.db.execute(query)
+            tests = result.scalars().all()
+
+            if not tests:
+                return None
+
+            # 计算综合性能指标
+            response_times = [t.avg_response_time for t in tests if t.avg_response_time]
+            first_token_times = [t.avg_first_token_time for t in tests if t.avg_first_token_time]
+            tokens_per_sec = [t.avg_throughput for t in tests if t.avg_throughput]  # 使用 avg_throughput
+            success_rates = [t.success_rate for t in tests if t.success_rate]
+            # 注意：ModelPerformanceTest 没有 total_cost 字段，我们跳过成本计算
+            costs = []
+
+            summary = {
+                "model_id": str(model_id),
+                "total_tests": len(tests),
+                "latest_test": tests[0].test_date.isoformat(),
+                "test_types": list(set(t.test_type for t in tests)),
+                "performance_metrics": {}
+            }
+
+            # 响应时间指标
+            if response_times:
+                summary["performance_metrics"]["response_time"] = {
+                    "avg": statistics.mean(response_times),
+                    "min": min(response_times),
+                    "max": max(response_times),
+                    "std": statistics.stdev(response_times) if len(response_times) > 1 else 0
+                }
+
+            # 首token时间指标
+            if first_token_times:
+                summary["performance_metrics"]["first_token_time"] = {
+                    "avg": statistics.mean(first_token_times),
+                    "min": min(first_token_times),
+                    "max": max(first_token_times)
+                }
+
+            # Token生成速度指标
+            if tokens_per_sec:
+                summary["performance_metrics"]["tokens_per_second"] = {
+                    "avg": statistics.mean(tokens_per_sec),
+                    "min": min(tokens_per_sec),
+                    "max": max(tokens_per_sec)
+                }
+
+            # 成功率指标
+            if success_rates:
+                summary["performance_metrics"]["success_rate"] = {
+                    "avg": statistics.mean(success_rates),
+                    "min": min(success_rates),
+                    "max": max(success_rates)
+                }
+
+            # 成本指标
+            if costs:
+                summary["performance_metrics"]["cost"] = {
+                    "avg": statistics.mean(costs),
+                    "min": min(costs),
+                    "max": max(costs)
+                }
+
+            # 计算性能评分 (0-100)
+            score = 0
+            score_factors = 0
+
+            if response_times:
+                # 响应时间评分 (越快越好，假设1000ms为基准)
+                avg_response = statistics.mean(response_times)
+                time_score = max(0, 100 - (avg_response / 10))  # 每10ms扣1分
+                score += time_score
+                score_factors += 1
+
+            if success_rates:
+                # 成功率评分
+                avg_success = statistics.mean(success_rates)
+                score += avg_success
+                score_factors += 1
+
+            if tokens_per_sec:
+                # Token生成速度评分 (假设50 tokens/sec为基准)
+                avg_tokens = statistics.mean(tokens_per_sec)
+                token_score = min(100, (avg_tokens / 50) * 100)
+                score += token_score
+                score_factors += 1
+
+            if score_factors > 0:
+                summary["performance_score"] = score / score_factors
+            else:
+                summary["performance_score"] = 0
+
+            return summary
+
+        except Exception as e:
+            logger.error(f"获取模型性能摘要失败: {str(e)}")
+            return None

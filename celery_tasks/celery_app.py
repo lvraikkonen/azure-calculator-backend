@@ -12,7 +12,8 @@ celery_app = Celery(
         "celery_tasks.tasks.intent_tasks",
         "celery_tasks.tasks.title_tasks",
         "celery_tasks.tasks.log_tasks",
-        "celery_tasks.tasks.performance_tasks"
+        "celery_tasks.tasks.performance_tasks",
+        "celery_tasks.tasks.token_billing_tasks"
     ]
 )
 

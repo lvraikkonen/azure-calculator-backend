@@ -19,8 +19,9 @@ from app.services.intent_analysis import IntentAnalysisService
 from app.services.product import ProductService
 from app.services.llm.context_providers import ProductContextProvider
 
-from celery_tasks.tasks.intent_tasks import analyze_intent
-from celery_tasks.tasks.title_tasks import generate_title
+# 延迟导入Celery任务以避免循环导入
+# from celery_tasks.tasks.intent_tasks import analyze_intent
+# from celery_tasks.tasks.title_tasks import generate_title
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -59,10 +60,49 @@ class ConversationService:
 
         return providers
 
-    async def _get_llm_service(self, model_type: str = None, model_name: str = None):
-        """获取LLM服务实例"""
-        model_type_enum = ModelType(model_type) if model_type else None
-        return await self.llm_factory.get_service(model_type_enum, model_name)
+    async def _get_llm_service(self, context: Dict[str, Any] = None):
+        """
+        获取LLM服务实例，支持智能模型选择
+
+        Args:
+            context: 消息上下文，包含模型选择参数
+        """
+        context = context or {}
+
+        try:
+            # 检查是否启用智能模型选择
+            if context.get("use_smart_selection", False):
+                logger.debug("启用智能模型选择")
+
+                task_type = context.get("task_type", "general")
+                performance_requirements = context.get("performance_requirements")
+                reasoning = context.get("reasoning", False)
+
+                return await self.llm_factory.get_service_with_smart_selection(
+                    task_type=task_type,
+                    performance_requirements=performance_requirements,
+                    reasoning=reasoning
+                )
+
+            # 传统模型选择方式
+            model_id = context.get("model_id")
+            model_type = context.get("model_type")
+            model_name = context.get("model_name")
+
+            # 如果提供了模型ID，优先使用
+            if model_id:
+                logger.debug(f"使用模型ID创建服务: {model_id}")
+                return await self.llm_factory.create_service_from_model_id(model_id)
+
+            # 否则使用传统方式
+            model_type_enum = ModelType(model_type) if model_type else None
+            reasoning = context.get("reasoning", False)
+            return await self.llm_factory.get_service(model_type_enum, model_name, reasoning)
+
+        except Exception as e:
+            logger.warning(f"获取LLM服务失败: {str(e)}, 使用默认服务")
+            # 回退到默认服务
+            return await self.llm_factory.get_service()
 
     async def _should_analyze_intent(self, conversation_id: UUID, message: str) -> bool:
         """
@@ -158,8 +198,13 @@ class ConversationService:
             # 快速分析基本意图 - 不阻塞主流程
             basic_intent = self._get_basic_intent(message)
 
-            # 在后台启动详细意图分析
-            analyze_intent.delay(str(conversation_id), message)
+            # 在后台启动详细意图分析（延迟导入）
+            try:
+                from celery_tasks.tasks.intent_tasks import analyze_intent
+                analyze_intent.delay(str(conversation_id), message)
+            except ImportError as e:
+                logger.warning(f"无法导入意图分析任务: {e}")
+                # 继续执行，不影响主流程
 
             # 更新缓存
             await self._update_intent_cache(conversation_id, message, basic_intent)
@@ -192,7 +237,6 @@ class ConversationService:
         """
         # 简单规则判断
         intent = "其他"
-        entities = {}
 
         # 产品查询相关关键词
         product_keywords = ["产品", "服务", "方案", "价格", "配置", "对比", "推荐", "费用", "云", "Azure", "成本"]
@@ -282,8 +326,8 @@ class ConversationService:
         conversation = Conversation(
             user_id=user_id,
             title=title,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         self.db.add(conversation)
@@ -437,7 +481,7 @@ class ConversationService:
 
         # 更新标题
         conversation.title = title
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(timezone.utc)
 
         await self.db.commit()
         return True
@@ -461,7 +505,7 @@ class ConversationService:
                 return result
 
         # 更新对话时间
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(timezone.utc)
 
         # 检查是否需要生成标题
         if is_new_conversation or conversation.title == "新对话":
@@ -470,13 +514,19 @@ class ConversationService:
                 model_type_value = llm_service.model_type.value if hasattr(llm_service, 'model_type') else None
                 model_name = llm_service.model_name if hasattr(llm_service, 'model_name') else None
 
-                generate_title.delay(
-                    str(conversation_id),
-                    user_message,
-                    ai_response,
-                    model_type_value,
-                    model_name
-                )
+                # 延迟导入标题生成任务
+                try:
+                    from celery_tasks.tasks.title_tasks import generate_title
+                    generate_title.delay(
+                        str(conversation_id),
+                        user_message,
+                        ai_response,
+                        model_type_value,
+                        model_name
+                    )
+                except ImportError as e:
+                    logger.warning(f"无法导入标题生成任务: {e}")
+                    # 继续执行，不影响主流程
 
                 logger.info(f"已提交对话 {conversation_id} 的标题生成任务")
             except Exception as e:
@@ -535,7 +585,7 @@ class ConversationService:
                 raise ValueError("对话不存在或无权限访问")
 
         # 存储用户消息
-        user_message_id = await self._store_message(
+        await self._store_message(
             conversation_id,
             message_create.content,
             "user",
@@ -555,10 +605,8 @@ class ConversationService:
         extra_context = message_create.context or {}
         extra_context["intent_analysis"] = intent_analysis
 
-        # 获取LLM服务
-        model_type = message_create.context.get("model_type") if message_create.context else None
-        model_name = message_create.context.get("model_name") if message_create.context else None
-        llm_service = await self._get_llm_service(model_type, model_name)
+        # 获取LLM服务（支持智能模型选择）
+        llm_service = await self._get_llm_service(message_create.context)
 
         return {
             "conversation_id": conversation_id,
@@ -606,7 +654,7 @@ class ConversationService:
                 response_context["suggestions"] = message_response.suggestions
             if message_response.recommendation:
                 response_context[
-                    "recommendation"] = message_response.recommendation.dict() if message_response.recommendation else None
+                    "recommendation"] = message_response.recommendation.model_dump() if message_response.recommendation else None
             if ai_response.get("thinking"):
                 response_context["thinking"] = ai_response["thinking"]
 
@@ -838,7 +886,7 @@ class ConversationService:
             conversation_id=conversation_id,
             content=content,
             sender=sender,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             context=context or {}
         )
         
@@ -901,13 +949,13 @@ class ConversationService:
         if existing_feedback:
             existing_feedback.feedback_type = feedback_type
             existing_feedback.comment = comment
-            existing_feedback.created_at = datetime.utcnow()
+            existing_feedback.created_at = datetime.now(timezone.utc)
         else:
             feedback = Feedback(
                 message_id=message_id,
                 feedback_type=feedback_type,
                 comment=comment,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             self.db.add(feedback)
             

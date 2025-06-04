@@ -18,7 +18,13 @@ class MessageCreate(MessageBase):
     context: Optional[Dict[str, Any]] = Field(default={}, description="消息上下文，如产品数据等")
     model_type: Optional[str] = None  # 添加直接的模型类型字段
     model_name: Optional[str] = None  # 添加直接的模型名称字段
+    model_id: Optional[str] = Field(None, description="指定模型ID（优先级最高）")
     use_reasoning: Optional[bool] = False  # 是否使用推理能力
+
+    # 智能模型选择参数
+    task_type: Optional[str] = Field("general", description="任务类型：general, reasoning, speed, cost_effective")
+    use_smart_selection: Optional[bool] = Field(False, description="是否启用智能模型选择")
+    performance_requirements: Optional[Dict[str, Any]] = Field(None, description="性能要求")
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -27,10 +33,23 @@ class MessageCreate(MessageBase):
             self.context["model_type"] = self.model_type
         if self.model_name and "model_name" not in self.context:
             self.context["model_name"] = self.model_name
+        if self.model_id and "model_id" not in self.context:
+            self.context["model_id"] = self.model_id
+
+        # 智能模型选择参数
+        if self.use_smart_selection:
+            self.context["use_smart_selection"] = True
+            self.context["task_type"] = self.task_type
+            if self.performance_requirements:
+                self.context["performance_requirements"] = self.performance_requirements
+
         if self.use_reasoning:
             self.context["reasoning"] = True
+            # 如果启用了智能选择，调整任务类型
+            if self.use_smart_selection:
+                self.context["task_type"] = "reasoning"
             # 如果用户请求推理但没指定模型，使用默认推理模型
-            if not self.model_name:
+            elif not self.model_name and not self.model_id:
                 self.context["model_name"] = settings.DEEPSEEK_R1_MODEL
                 self.context["model_type"] = "deepseek"
 
@@ -125,9 +144,15 @@ class FeedbackResponse(FeedbackCreate):
 
 class ModelInfo(BaseModel):
     """模型信息模式"""
-    model_type: str
-    model_name: str
-    display_name: str
-    description: str
-    supports_reasoning: bool
-    is_default: bool
+    id: Optional[str] = Field(None, description="模型ID（来自数据库）")
+    model_type: str = Field(..., description="模型类型")
+    model_name: str = Field(..., description="模型名称")
+    display_name: str = Field(..., description="显示名称")
+    description: str = Field(..., description="模型描述")
+    supports_reasoning: bool = Field(False, description="是否支持推理")
+    is_default: bool = Field(False, description="是否为默认模型")
+    is_custom: Optional[bool] = Field(None, description="是否为自定义模型")
+    input_price: Optional[float] = Field(None, description="输入价格")
+    output_price: Optional[float] = Field(None, description="输出价格")
+    max_tokens: Optional[int] = Field(None, description="最大token数")
+    capabilities: Optional[List[str]] = Field(None, description="模型能力列表")

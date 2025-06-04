@@ -19,13 +19,19 @@ from app.services.llm.base import ModelType, BaseLLMService, ContextProvider
 from app.services.llm.context_providers import ProductContextProvider
 from app.services.intent_analysis import IntentAnalysisService
 from app.services.conversation import ConversationService
+from app.services.model_management.model_configuration_service import ModelConfigurationService
+from app.services.model_management.factory import ModelManagementServiceFactory
 from app.rag.services.hybrid_rag_service import HybridRAGService
 from app.rag.services.rag_factory import create_rag_service
 
 settings = get_settings()
 logger = get_logger(__name__)
 
-llm_factory = LLMServiceFactory()
+# 创建模型管理服务工厂（单例）
+model_management_factory = ModelManagementServiceFactory()
+
+# 全局LLM工厂实例（将在get_llm_factory中动态注入模型配置服务）
+llm_factory = None
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
@@ -182,10 +188,50 @@ async def get_product_service(
     """
     return ProductService(db)
 
-async def get_llm_factory() -> LLMServiceFactory:
+async def get_llm_factory(db: AsyncSession = Depends(get_db)) -> LLMServiceFactory:
     """
-    获取LLM服务工厂实例
+    获取LLM服务工厂实例，动态注入模型配置服务
     """
+    global llm_factory
+
+    # 如果工厂实例不存在，创建一个新的
+    if llm_factory is None:
+        logger.info("开始创建LLM服务工厂...")
+
+        try:
+            logger.debug(f"数据库会话类型: {type(db)}")
+            logger.debug(f"模型管理工厂类型: {type(model_management_factory)}")
+
+            # 创建模型配置服务
+            logger.debug("正在创建模型配置服务...")
+            model_config_service = model_management_factory.create_service(db)
+            logger.info(f"模型配置服务创建成功: {type(model_config_service).__name__}")
+
+            # 创建性能测试服务
+            logger.debug("正在创建性能测试服务...")
+            from app.services.model_management.model_performance_service import ModelPerformanceService
+            performance_service = ModelPerformanceService(db)
+            logger.info(f"性能测试服务创建成功: {type(performance_service).__name__}")
+
+            # 创建带有模型配置服务和性能测试服务的LLM工厂
+            logger.debug("正在创建带配置服务和性能服务的LLM工厂...")
+            llm_factory = LLMServiceFactory(
+                model_config_service=model_config_service,
+                performance_service=performance_service
+            )
+
+            logger.info("✅ LLM服务工厂已创建并注入模型配置服务和性能测试服务")
+
+        except Exception as e:
+            logger.error(f"❌ 创建模型配置服务失败: {str(e)}")
+            logger.error(f"异常类型: {type(e).__name__}")
+            import traceback
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
+
+            logger.warning("回退到无配置服务的LLM工厂")
+            # 回退到无配置服务的工厂
+            llm_factory = LLMServiceFactory()
+
     return llm_factory
 
 async def get_llm_service(

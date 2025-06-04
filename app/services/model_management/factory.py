@@ -18,8 +18,8 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class ModelServiceFactory:
-    """模型服务工厂类"""
+class ModelManagementServiceFactory:
+    """模型管理服务工厂类"""
     
     def __init__(self, config: Optional[ModelConfigurationServiceConfig] = None):
         """
@@ -100,10 +100,10 @@ class ModelServiceFactory:
 
 
 # 全局工厂实例
-_factory_instance: Optional[ModelServiceFactory] = None
+_factory_instance: Optional[ModelManagementServiceFactory] = None
 
 
-def get_factory(config: Optional[ModelConfigurationServiceConfig] = None) -> ModelServiceFactory:
+def get_factory(config: Optional[ModelConfigurationServiceConfig] = None) -> ModelManagementServiceFactory:
     """
     获取全局工厂实例
     
@@ -116,8 +116,8 @@ def get_factory(config: Optional[ModelConfigurationServiceConfig] = None) -> Mod
     global _factory_instance
     
     if _factory_instance is None:
-        _factory_instance = ModelServiceFactory(config)
-        logger.info("创建全局模型服务工厂")
+        _factory_instance = ModelManagementServiceFactory(config)
+        logger.info("创建全局模型管理服务工厂")
     
     return _factory_instance
 
@@ -161,7 +161,7 @@ def create_development_service(db: AsyncSession) -> ModelConfigurationService:
         开发环境配置的服务实例
     """
     config = create_development_config()
-    factory = ModelServiceFactory(config)
+    factory = ModelManagementServiceFactory(config)
     return factory.create_service(db)
 
 
@@ -176,7 +176,7 @@ def create_production_service(db: AsyncSession) -> ModelConfigurationService:
         生产环境配置的服务实例
     """
     config = create_production_config()
-    factory = ModelServiceFactory(config)
+    factory = ModelManagementServiceFactory(config)
     return factory.create_service(db)
 
 
@@ -191,7 +191,7 @@ def create_test_service(db: AsyncSession) -> ModelConfigurationService:
         测试环境配置的服务实例
     """
     config = create_test_config()
-    factory = ModelServiceFactory(config)
+    factory = ModelManagementServiceFactory(config)
     return factory.create_service(db)
 
 
@@ -246,7 +246,7 @@ def with_model_service(config: Optional[ModelConfigurationServiceConfig] = None)
 # 健康检查函数
 async def health_check(db: AsyncSession) -> dict:
     """
-    执行模型服务健康检查
+    执行模型管理服务健康检查
     
     Args:
         db: 数据库会话
