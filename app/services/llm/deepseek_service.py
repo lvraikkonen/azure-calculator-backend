@@ -15,11 +15,12 @@ logger = get_logger(__name__)
 class DeepseekService(BaseLLMService):
     """Deepseek服务实现"""
 
-    def __init__(self, model_name=None, api_key=None, base_url=None):
+    def __init__(self, model_name=None, api_key=None, base_url=None, capabilities=None, model_id=None):
         """初始化Deepseek服务"""
         self.api_key = api_key or settings.DEEPSEEK_API_KEY
         self.base_url = base_url or settings.DEEPSEEK_API_BASE
         self.model_name = model_name or settings.DEEPSEEK_MODEL
+        self.model_id = model_id  # 存储模型ID用于日志
 
         # 初始化客户端 - Deepseek使用OpenAI兼容API
         self.client = AsyncOpenAI(
@@ -27,15 +28,23 @@ class DeepseekService(BaseLLMService):
             base_url=self.base_url
         )
 
-        # 确定模型能力
-        self._capabilities = [ModelCapability.TEXT]
+        # 确定模型能力 - 优先使用数据库中的能力信息
+        self._capabilities = [ModelCapability.TEXT]  # 默认都支持文本
 
-        # 判断是否为推理模型
-        self.is_reasoning_model = 'reasoner' in self.model_name.lower()
-        if self.is_reasoning_model:
-            self._capabilities.append(ModelCapability.REASONING)
+        if capabilities:
+            # 使用数据库中的能力信息
+            if "reasoning" in capabilities:
+                self._capabilities.append(ModelCapability.REASONING)
+                self.is_reasoning_model = True
+            else:
+                self.is_reasoning_model = False
+        else:
+            # 回退到基于模型名称的判断（兼容性）
+            self.is_reasoning_model = 'reasoner' in self.model_name.lower()
+            if self.is_reasoning_model:
+                self._capabilities.append(ModelCapability.REASONING)
 
-        logger.info(f"初始化Deepseek服务: {self.model_name}, 能力: {self._capabilities}, 推理模型: {self.is_reasoning_model}")
+        logger.info(f"初始化Deepseek服务: {self.model_name}, 模型ID: {self.model_id}, 能力: {self._capabilities}, 推理模型: {self.is_reasoning_model}")
 
     @property
     def capabilities(self) -> List[ModelCapability]:
@@ -210,13 +219,20 @@ class DeepseekService(BaseLLMService):
                 delta = chunk.choices[0].delta
                 result = {}
 
-                # 处理推理内容 - 直接提供reasoning_content
-                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    result['reasoning_content'] = delta.reasoning_content
+                # 处理推理内容 - 只有推理模型才尝试获取reasoning_content
+                if self.is_reasoning_model:
+                    try:
+                        if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                            result['reasoning_content'] = delta.reasoning_content
+                    except Exception as e:
+                        logger.debug(f"获取推理内容失败: {str(e)}")
 
                 # 处理常规内容
-                if hasattr(delta, 'content') and delta.content:
-                    result['content'] = delta.content
+                try:
+                    if hasattr(delta, 'content') and delta.content:
+                        result['content'] = delta.content
+                except Exception as e:
+                    logger.debug(f"获取内容失败: {str(e)}")
 
                 # 只有当有内容时才返回
                 if result:

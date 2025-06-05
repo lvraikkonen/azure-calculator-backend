@@ -88,17 +88,28 @@ class ConversationService:
             model_id = context.get("model_id")
             model_type = context.get("model_type")
             model_name = context.get("model_name")
+            reasoning = context.get("reasoning", False)
 
             # 如果提供了模型ID，优先使用
             if model_id:
                 logger.debug(f"使用模型ID创建服务: {model_id}")
-                return await self.llm_factory.create_service_from_model_id(model_id)
+                service = await self.llm_factory.create_service_from_model_id(model_id)
+
+                # 验证模型能力：如果用户请求推理功能，检查模型是否支持
+                if reasoning and not service.supports_reasoning:
+                    logger.warning(f"模型 {model_id} 不支持推理功能，但用户请求了推理")
+                    raise ValueError(f"指定的模型不支持推理功能。请选择支持推理的模型或移除 use_reasoning 参数。")
+
+                return service
 
             # 否则使用传统方式
             model_type_enum = ModelType(model_type) if model_type else None
-            reasoning = context.get("reasoning", False)
             return await self.llm_factory.get_service(model_type_enum, model_name, reasoning)
 
+        except ValueError as e:
+            # 重新抛出验证错误，不要回退
+            logger.error(f"模型选择验证失败: {str(e)}")
+            raise
         except Exception as e:
             logger.warning(f"获取LLM服务失败: {str(e)}, 使用默认服务")
             # 回退到默认服务

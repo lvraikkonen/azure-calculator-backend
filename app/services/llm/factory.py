@@ -193,10 +193,12 @@ class LLMServiceFactory:
                     logger.error(f"API密钥解密失败: {str(e)}")
                     raise ValueError("API密钥解密失败")
 
-            # 创建服务配置
+            # 创建服务配置，包含模型能力信息
             config = {
                 "api_key": decrypted_api_key,
-                "base_url": model_config.base_url
+                "base_url": model_config.base_url,
+                "capabilities": model_config.capabilities or [],  # 传递数据库中的能力信息
+                "model_id": model_id  # 传递模型ID用于日志和调试
             }
 
             # 通过现有方法创建服务
@@ -276,7 +278,9 @@ class LLMServiceFactory:
             service = service_class(
                 model_name=model_name,
                 api_key=config.get('api_key'),
-                base_url=config.get('base_url')
+                base_url=config.get('base_url'),
+                capabilities=config.get('capabilities'),
+                model_id=config.get('model_id')
             )
 
         # 缓存实例
