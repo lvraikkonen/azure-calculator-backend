@@ -50,6 +50,9 @@ export interface ModelInfo {
   created_at: string
   updated_at: string
   metadata?: ModelMetadata
+  // Store需要的额外字段
+  provider?: string
+  status?: 'active' | 'inactive' | 'maintenance'
 }
 
 // 模型元数据
@@ -294,3 +297,8 @@ interface TokenUsage {
   total_tokens: number
   estimated_cost?: number
 }
+
+// Store需要的额外类型
+export type ModelConfiguration = ModelInfo
+export type ModelPerformanceData = ModelPerformance
+export type ModelTestResult = ModelTestResponse

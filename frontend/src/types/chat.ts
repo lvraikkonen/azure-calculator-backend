@@ -239,3 +239,8 @@ export interface SearchHighlight {
   field: string
   fragments: string[]
 }
+
+// Store需要的额外类型
+export type Message = ChatMessage
+export type CreateConversationRequest = ConversationCreate
+export type SendMessageRequest = MessageCreate

@@ -81,6 +81,9 @@ export interface UserBilling {
   updated_at: string
   payment_method?: PaymentMethod
   billing_address?: BillingAddress
+  // Store需要的额外字段
+  remaining_balance?: number
+  monthly_limit?: number
 }
 
 // 支付方式
@@ -117,6 +120,8 @@ export interface UsageStatistics {
   model_breakdown: ModelUsageBreakdown[]
   daily_usage: DailyUsage[]
   cost_trend: CostTrend[]
+  // Store需要的额外字段
+  date?: string
 }
 
 // 模型使用分解
@@ -341,4 +346,24 @@ export interface UsageSummary {
   unique_users: number
   unique_models: number
   date_range: [string, string]
+}
+
+// Store需要的额外类型
+export type TokenUsageStats = UsageStatistics
+export type BillingInfo = UserBilling
+export type UsageReport = Invoice
+export type CostProjection = CostPrediction
+export type MonitoringAlert = {
+  id: string
+  type: 'usage' | 'cost' | 'error'
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  title: string
+  message: string
+  status: 'active' | 'read' | 'resolved'
+  created_at: string
+  model_id?: string
+  model_name?: string
+  current_value?: number
+  threshold_value?: number
+  metadata?: Record<string, any>
 }

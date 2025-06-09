@@ -48,8 +48,9 @@ export class AuthAPI {
   /**
    * 刷新Token
    */
-  async refreshToken(): Promise<LoginResponse> {
-    return httpClient.post<LoginResponse>('/auth/refresh')
+  async refreshToken(refreshToken?: string): Promise<LoginResponse> {
+    const data = refreshToken ? { refresh_token: refreshToken } : {}
+    return httpClient.post<LoginResponse>('/auth/refresh', data)
   }
 
   /**

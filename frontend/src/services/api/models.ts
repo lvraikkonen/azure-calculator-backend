@@ -349,6 +349,63 @@ export class ModelsAPI {
       warnings: string[]
     }>('/models-management/models/validate', config)
   }
+
+  // Store需要的额外方法
+  /**
+   * 获取模型配置列表
+   */
+  async getModelConfigurations(): Promise<any[]> {
+    return this.getModels().then(response => response.models || [])
+  }
+
+  /**
+   * 运行模型测试
+   */
+  async runModelTest(request: any): Promise<any> {
+    return this.runPerformanceTest(request)
+  }
+
+  /**
+   * 获取推荐模型
+   */
+  async getRecommendedModel(taskType: string, performanceRequirements?: any): Promise<any> {
+    return this.recommendOptimalModel({
+      task_type: taskType,
+      performance_requirements: performanceRequirements
+    }).then(response => response.model_info || null)
+  }
+
+  /**
+   * 创建模型配置
+   */
+  async createModelConfiguration(config: any): Promise<any> {
+    return this.createModel(config)
+  }
+
+  /**
+   * 更新模型配置
+   */
+  async updateModelConfiguration(configId: string, updates: any): Promise<any> {
+    return this.updateModel(configId, updates)
+  }
+
+  /**
+   * 删除模型配置
+   */
+  async deleteModelConfiguration(configId: string): Promise<void> {
+    return this.deleteModel(configId)
+  }
+
+  /**
+   * 获取模型统计信息
+   */
+  async getModelStatistics(): Promise<any> {
+    return this.getAllModelsPerformance().then(data => ({
+      total_models: data.length,
+      active_models: data.filter((m: any) => m.status === 'active').length,
+      performance_data: data
+    }))
+  }
 }
 
 // 创建并导出API实例

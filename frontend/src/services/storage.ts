@@ -59,6 +59,43 @@ export class StorageService {
     this.storage = type === StorageType.LOCAL ? window.localStorage : window.sessionStorage
   }
 
+  // 静态方法用于stores
+  static getToken(): string | null {
+    return storage.getAuthToken()
+  }
+
+  static setToken(token: string): void {
+    storage.setAuthToken(token)
+  }
+
+  static getUser(): any {
+    return storage.getUserInfo()
+  }
+
+  static setUser(user: any): void {
+    storage.setUserInfo(user)
+  }
+
+  static getRefreshToken(): string | null {
+    return storage.getRefreshToken()
+  }
+
+  static setRefreshToken(token: string): void {
+    storage.setRefreshToken(token)
+  }
+
+  static getItem(key: string): string | null {
+    return localStorage.getString(key)
+  }
+
+  static setItem(key: string, value: string): void {
+    localStorage.setString(key, value)
+  }
+
+  static clearAuth(): void {
+    storage.clearAuth()
+  }
+
   /**
    * 设置存储项
    */
@@ -364,10 +401,14 @@ export const storage = {
   setAuthToken: (token: string) => localStorage.setString(STORAGE_KEYS.AUTH_TOKEN, token),
   getAuthToken: () => localStorage.getString(STORAGE_KEYS.AUTH_TOKEN),
   removeAuthToken: () => localStorage.remove(STORAGE_KEYS.AUTH_TOKEN),
-  
+
   setUserInfo: (userInfo: any) => localStorage.set(STORAGE_KEYS.USER_INFO, userInfo),
   getUserInfo: () => localStorage.get(STORAGE_KEYS.USER_INFO),
   removeUserInfo: () => localStorage.remove(STORAGE_KEYS.USER_INFO),
+
+  setRefreshToken: (token: string) => localStorage.setString(STORAGE_KEYS.REFRESH_TOKEN, token),
+  getRefreshToken: () => localStorage.getString(STORAGE_KEYS.REFRESH_TOKEN),
+  removeRefreshToken: () => localStorage.remove(STORAGE_KEYS.REFRESH_TOKEN),
   
   // 用户偏好
   setTheme: (theme: string) => localStorage.set(STORAGE_KEYS.THEME, theme),

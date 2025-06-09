@@ -10,6 +10,13 @@ export type { AxiosRequestConfig, AxiosResponse } from './http'
 export { authAPI, AuthAPI } from './api/auth'
 export { chatAPI, ChatAPI } from './api/chat'
 export { modelsAPI, ModelsAPI } from './api/models'
+export { billingAPI, BillingAPI } from './api/billing'
+
+// 为stores提供的简化服务接口
+export const authService = authAPI
+export const chatService = chatAPI
+export const modelService = modelsAPI
+export const billingService = billingAPI
 
 // WebSocket服务
 export {
@@ -97,10 +104,13 @@ import { modelsAPI } from './api/models'
 import { webSocketService } from './websocket'
 import { storage } from './storage'
 
+import { billingAPI } from './api/billing'
+
 serviceFactory.register('http', httpClient)
 serviceFactory.register('auth', authAPI)
 serviceFactory.register('chat', chatAPI)
 serviceFactory.register('models', modelsAPI)
+serviceFactory.register('billing', billingAPI)
 serviceFactory.register('websocket', webSocketService)
 serviceFactory.register('storage', storage)
 
