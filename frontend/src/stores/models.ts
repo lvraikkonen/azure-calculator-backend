@@ -42,8 +42,8 @@ export const useModelsStore = defineStore('models', () => {
     return grouped
   })
 
-  const activeModels = computed(() => 
-    availableModels.value.filter(model => model.status === 'active')
+  const activeModels = computed(() =>
+    availableModels.value.filter(model => model.is_active === true)
   )
 
   const modelCount = computed(() => availableModels.value.length)
@@ -93,9 +93,13 @@ export const useModelsStore = defineStore('models', () => {
   // 选择模型
   const selectModel = (modelId: string): boolean => {
     const model = availableModels.value.find(m => m.id === modelId)
-    if (model && model.status === 'active') {
-      selectedModelId.value = modelId
-      return true
+    if (model) {
+      // 检查模型状态，如果没有status字段，默认认为是可用的
+      const isActive = model.status === 'active' || !model.status
+      if (isActive) {
+        selectedModelId.value = modelId
+        return true
+      }
     }
     return false
   }

@@ -84,10 +84,17 @@ export const useUIStore = defineStore('ui', () => {
   }
 
   const toggleTheme = () => {
-    const themes: Theme[] = ['light', 'dark', 'auto']
-    const currentIndex = themes.indexOf(theme.value)
-    const nextIndex = (currentIndex + 1) % themes.length
-    setTheme(themes[nextIndex])
+    // 基于当前实际显示的主题进行切换，而不是基于设置值
+    const actualTheme = currentTheme.value
+
+    if (actualTheme === 'light') {
+      setTheme('dark')
+    } else if (actualTheme === 'dark') {
+      setTheme('light')
+    } else {
+      // 如果出现其他情况，默认切换到 dark
+      setTheme('dark')
+    }
   }
 
   const applyTheme = () => {

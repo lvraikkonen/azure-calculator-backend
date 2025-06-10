@@ -366,6 +366,129 @@ async def export_data(
         raise HTTPException(status_code=500, detail="导出数据失败")
 
 
+@router.get("/usage/current", response_model=dict)
+async def get_current_usage(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取当前用户的使用统计"""
+    try:
+        # 暂时返回模拟数据，后续可以从数据库获取真实数据
+        return {
+            "user_id": str(current_user.id),
+            "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),
+            "period_end": datetime.now(timezone.utc).isoformat(),
+            "total_requests": 150,
+            "total_tokens": 45000,
+            "total_cost": 12.50,
+            "currency": "USD",
+            "model_breakdown": [],
+            "daily_usage": [],
+            "cost_trend": [],
+            "date": datetime.now(timezone.utc).date().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"获取当前使用统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取使用统计失败")
+
+
+@router.get("/billing/info", response_model=dict)
+async def get_billing_info(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取计费信息"""
+    try:
+        # 暂时返回模拟数据，后续可以从数据库获取真实数据
+        return {
+            "user_id": str(current_user.id),
+            "username": current_user.username,
+            "status": "active",
+            "current_balance": 87.50,
+            "credit_limit": 100.00,
+            "currency": "USD",
+            "billing_period": "monthly",
+            "next_billing_date": (datetime.now(timezone.utc) + timedelta(days=15)).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "remaining_balance": 87.50,
+            "monthly_limit": 100.00
+        }
+    except Exception as e:
+        logger.error(f"获取计费信息失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取计费信息失败")
+
+
+@router.get("/usage/history", response_model=list)
+async def get_usage_history(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取使用历史"""
+    try:
+        # 暂时返回模拟数据，后续可以从数据库获取真实数据
+        history = []
+        for i in range(min(days, 7)):
+            date = datetime.now(timezone.utc) - timedelta(days=i)
+            history.append({
+                "user_id": str(current_user.id),
+                "period_start": date.isoformat(),
+                "period_end": date.isoformat(),
+                "total_requests": 10 + (i * 5),
+                "total_tokens": 1000 + (i * 500),
+                "total_cost": 1.0 + (i * 0.5),
+                "currency": "USD",
+                "model_breakdown": [],
+                "daily_usage": [],
+                "cost_trend": [],
+                "date": date.date().isoformat()
+            })
+        return history
+    except Exception as e:
+        logger.error(f"获取使用历史失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取使用历史失败")
+
+
+@router.get("/alerts", response_model=list)
+async def get_alerts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取监控告警"""
+    try:
+        # 暂时返回模拟数据，后续可以从数据库获取真实数据
+        return [
+            {
+                "id": "alert-1",
+                "type": "usage_limit",
+                "severity": "warning",
+                "title": "使用量接近限制",
+                "message": "当前使用量已达到月度限制的80%",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_read": False
+            }
+        ]
+    except Exception as e:
+        logger.error(f"获取告警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取告警失败")
+
+
+@router.patch("/alerts/{alert_id}/read")
+async def mark_alert_as_read(
+    alert_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """标记告警为已读"""
+    try:
+        # 暂时返回成功，后续可以更新数据库
+        return {"success": True, "message": "告警已标记为已读"}
+    except Exception as e:
+        logger.error(f"标记告警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="标记告警失败")
+
+
 @router.get("/health", response_model=HealthCheckResponse)
 async def health_check(
     db: AsyncSession = Depends(get_db)
@@ -374,12 +497,12 @@ async def health_check(
     try:
         # 检查数据库连接
         await db.execute("SELECT 1")
-        
+
         # 检查插件状态
         plugin_manager = get_plugin_manager()
         plugins = plugin_manager.list_plugins()
         active_plugins = sum(1 for p in plugins.values() if p.status.value == "active")
-        
+
         return HealthCheckResponse(
             status="healthy",
             database_connected=True,
@@ -387,7 +510,7 @@ async def health_check(
             total_plugins=len(plugins),
             checked_at=datetime.now(timezone.utc)
         )
-        
+
     except Exception as e:
         logger.error(f"健康检查失败: {str(e)}", exc_info=True)
         return HealthCheckResponse(

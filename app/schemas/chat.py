@@ -151,6 +151,7 @@ class ModelInfo(BaseModel):
     description: str = Field(..., description="模型描述")
     supports_reasoning: bool = Field(False, description="是否支持推理")
     is_default: bool = Field(False, description="是否为默认模型")
+    is_active: bool = Field(True, description="是否激活")
     is_custom: Optional[bool] = Field(None, description="是否为自定义模型")
     input_price: Optional[float] = Field(None, description="输入价格")
     output_price: Optional[float] = Field(None, description="输出价格")

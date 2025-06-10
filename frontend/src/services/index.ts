@@ -118,11 +118,10 @@ serviceFactory.register('storage', storage)
 export async function initializeServices(): Promise<void> {
   try {
     console.log('Initializing services...')
-    
+
     // 清理过期缓存
-    localStorage.cleanExpiredCache()
-    sessionStorage.cleanExpiredCache()
-    
+    storage.cleanExpiredCache()
+
     // 检查认证状态
     const token = storage.getAuthToken()
     if (token) {
@@ -134,7 +133,7 @@ export async function initializeServices(): Promise<void> {
         storage.clearAuth()
       }
     }
-    
+
     console.log('Services initialized successfully')
   } catch (error) {
     console.error('Failed to initialize services:', error)
@@ -146,14 +145,13 @@ export async function initializeServices(): Promise<void> {
 export function cleanupServices(): void {
   try {
     console.log('Cleaning up services...')
-    
+
     // 断开WebSocket连接
     webSocketService.disconnect()
-    
+
     // 清理缓存
-    localStorage.clearCache()
-    sessionStorage.clearCache()
-    
+    storage.clearCache()
+
     console.log('Services cleaned up successfully')
   } catch (error) {
     console.error('Failed to cleanup services:', error)
@@ -253,14 +251,16 @@ export function cached<T extends (...args: any[]) => Promise<any>>(
     const key = `${cacheKey}_${JSON.stringify(args)}`
 
     // 尝试从缓存获取
-    const cached = localStorage.getCache(cacheKey, key)
+    const cached = storage.getCache ? storage.getCache(cacheKey, key) : null
     if (cached !== null) {
       return cached
     }
 
     // 执行函数并缓存结果
     const result = await fn(...args)
-    localStorage.setCache(cacheKey, key, result, { ttl })
+    if (storage.setCache) {
+      storage.setCache(cacheKey, key, result, { ttl })
+    }
 
     return result
   }) as T

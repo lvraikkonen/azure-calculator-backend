@@ -71,7 +71,8 @@ export const useChatStore = defineStore('chat', () => {
       // 后端通过发送消息自动创建对话，所以我们直接发送消息
       const messageRequest: SendMessageRequest = {
         content: request.initial_message || request.title || '你好',
-        conversation_id: undefined // 不指定conversation_id，让后端自动创建
+        conversation_id: undefined, // 不指定conversation_id，让后端自动创建
+        model_id: request.model_id // 传递模型ID
       }
 
       const response = await chatService.sendMessage(messageRequest)

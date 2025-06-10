@@ -152,3 +152,15 @@ async def read_users_me(
     Get current user information.
     """
     return current_user
+
+@router.post("/logout")
+async def logout(
+    current_user: Annotated[UserModel, Depends(get_current_user)],
+) -> Any:
+    """
+    Logout current user.
+    Note: Since we're using stateless JWT tokens, logout is handled client-side
+    by removing the token. This endpoint serves as a confirmation and logging point.
+    """
+    logger.info(f"User logged out: {current_user.username}")
+    return {"message": "Successfully logged out"}

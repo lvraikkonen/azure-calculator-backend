@@ -455,7 +455,24 @@ export const storage = {
   clearAll: () => {
     localStorage.clear()
     sessionStorage.clear()
-  }
+  },
+
+  // 缓存管理
+  cleanExpiredCache: () => {
+    localStorage.cleanExpiredCache()
+    sessionStorage.cleanExpiredCache()
+  },
+
+  clearCache: () => {
+    localStorage.clearCache()
+    sessionStorage.clearCache()
+  },
+
+  // 缓存操作
+  getCache: (cacheKey: string, key: string) => localStorage.getCache(cacheKey, key),
+  setCache: (cacheKey: string, key: string, value: any, options?: { ttl?: number }) =>
+    localStorage.setCache(cacheKey, key, value, options),
+  removeCache: (cacheKey: string, key: string) => localStorage.removeCache(cacheKey, key)
 }
 
 // 定期清理过期缓存

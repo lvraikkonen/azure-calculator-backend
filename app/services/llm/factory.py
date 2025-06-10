@@ -114,6 +114,7 @@ class LLMServiceFactory:
             "description": model.description or "",
             "supports_reasoning": "reasoning" in (model.capabilities or []),
             "is_default": False,  # 可以后续根据配置确定
+            "is_active": model.is_active,  # 添加is_active字段
             "is_custom": model.is_custom,
             "input_price": model.input_price,
             "output_price": model.output_price,
@@ -128,32 +129,53 @@ class LLMServiceFactory:
         # 定义可用模型
         models = [
             {
+                "id": "hardcoded-deepseek-chat",  # 添加ID字段
                 "model_type": "deepseek",
                 "model_name": settings.DEEPSEEK_V3_MODEL,
                 "display_name": "Deepseek Chat",
                 "description": "适合一般对话和推荐任务的基础模型",
                 "supports_reasoning": False,
-                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_V3_MODEL == settings.DEEPSEEK_V3_MODEL
+                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_V3_MODEL == settings.DEEPSEEK_V3_MODEL,
+                "is_active": True,  # 添加is_active字段
+                "is_custom": False,
+                "input_price": 0.0,
+                "output_price": 0.0,
+                "max_tokens": 4096,
+                "capabilities": ["chat", "completion"]
             },
             {
+                "id": "hardcoded-deepseek-reasoner",  # 添加ID字段
                 "model_type": "deepseek",
                 "model_name": settings.DEEPSEEK_R1_MODEL,
                 "display_name": "Deepseek Reasoner",
                 "description": "支持推理能力的高级模型，适合复杂问题分析",
                 "supports_reasoning": True,
-                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_R1_MODEL == settings.DEEPSEEK_R1_MODEL
+                "is_default": settings.DEFAULT_MODEL_TYPE == "deepseek" and settings.DEEPSEEK_R1_MODEL == settings.DEEPSEEK_R1_MODEL,
+                "is_active": True,  # 添加is_active字段
+                "is_custom": False,
+                "input_price": 0.0,
+                "output_price": 0.0,
+                "max_tokens": 4096,
+                "capabilities": ["chat", "completion", "reasoning"]
             }
         ]
 
         # 如果配置了OpenAI模型，也添加到列表中
         if settings.OPENAI_API_KEY:
             models.append({
+                "id": "hardcoded-openai-chat",  # 添加ID字段
                 "model_type": "openai",
                 "model_name": settings.OPENAI_CHAT_MODEL,
                 "display_name": f"OpenAI {settings.OPENAI_CHAT_MODEL}",
                 "description": "OpenAI的对话模型",
                 "supports_reasoning": False,
-                "is_default": settings.DEFAULT_MODEL_TYPE == "openai"
+                "is_default": settings.DEFAULT_MODEL_TYPE == "openai",
+                "is_active": True,  # 添加is_active字段
+                "is_custom": False,
+                "input_price": 0.0,
+                "output_price": 0.0,
+                "max_tokens": 4096,
+                "capabilities": ["chat", "completion"]
             })
 
         return models
@@ -163,7 +185,7 @@ class LLMServiceFactory:
         通过模型ID创建LLM服务实例
 
         Args:
-            model_id: 数据库中的模型ID
+            model_id: 数据库中的模型ID或硬编码模型ID
 
         Returns:
             BaseLLMService: LLM服务实例
@@ -171,10 +193,15 @@ class LLMServiceFactory:
         Raises:
             ValueError: 如果模型不存在或不可用
         """
-        if not self.model_config_service:
-            raise ValueError("模型配置服务未注入，无法通过模型ID创建服务")
-
         try:
+            # 检查是否是硬编码模型ID
+            if model_id.startswith("hardcoded-"):
+                return await self._create_service_from_hardcoded_id(model_id)
+
+            # 处理数据库模型ID
+            if not self.model_config_service:
+                raise ValueError("模型配置服务未注入，无法通过数据库模型ID创建服务")
+
             # 从数据库获取模型配置
             model_config = await self.model_config_service.get_model_by_id(model_id)
             if not model_config:
@@ -212,6 +239,43 @@ class LLMServiceFactory:
         except Exception as e:
             logger.error(f"通过模型ID创建服务失败: {str(e)}")
             raise
+
+    async def _create_service_from_hardcoded_id(self, model_id: str) -> BaseLLMService:
+        """
+        通过硬编码模型ID创建服务实例
+
+        Args:
+            model_id: 硬编码模型ID
+
+        Returns:
+            BaseLLMService: LLM服务实例
+        """
+        # 获取硬编码模型列表
+        hardcoded_models = self._get_hardcoded_models()
+
+        # 查找对应的模型
+        model_info = None
+        for model in hardcoded_models:
+            if model["id"] == model_id:
+                model_info = model
+                break
+
+        if not model_info:
+            raise ValueError(f"硬编码模型不存在: {model_id}")
+
+        # 创建服务配置
+        config = {
+            "capabilities": model_info.get("capabilities", []),
+            "model_id": model_id
+        }
+
+        # 根据模型类型创建服务
+        model_type_enum = ModelType(model_info["model_type"])
+        return await self.create_service(
+            model_type=model_type_enum,
+            model_name=model_info["model_name"],
+            config=config
+        )
 
     async def create_service(self,
                              model_type: ModelType = None,
