@@ -78,14 +78,14 @@ export const useChatStore = defineStore('chat', () => {
       const response = await chatService.sendMessage(messageRequest)
 
       if (response && response.conversation_id) {
+        // 初始化消息数组并添加响应消息
+        messages.value[response.conversation_id] = [response]
+
         // 刷新对话列表以获取新创建的对话
         await fetchConversations()
 
-        // 设置当前对话
+        // 设置当前对话（在对话列表刷新完成后）
         currentConversationId.value = response.conversation_id
-
-        // 初始化消息数组并添加响应消息
-        messages.value[response.conversation_id] = [response]
 
         return response.conversation_id
       }
@@ -115,12 +115,21 @@ export const useChatStore = defineStore('chat', () => {
     try {
       isLoading.value = true
       lastError.value = null
-      
-      const response = await chatService.getMessages(conversationId)
-      messages.value[conversationId] = response
+
+      // 使用getConversation API获取对话及其消息
+      const response = await chatService.getConversation(conversationId)
+
+      // 提取消息数组
+      if (response && response.messages) {
+        messages.value[conversationId] = response.messages
+      } else {
+        messages.value[conversationId] = []
+      }
     } catch (error) {
       console.error('获取消息失败:', error)
       lastError.value = '获取消息失败'
+      // 确保即使失败也初始化空数组
+      messages.value[conversationId] = []
     } finally {
       isLoading.value = false
     }

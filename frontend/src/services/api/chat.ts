@@ -76,6 +76,8 @@ export class ChatAPI {
 
   /**
    * 获取对话消息
+   * 注意：后端实际API是 /chat/conversations/{id}，返回对话及其消息
+   * 这个方法为了兼容性，内部调用getConversation并提取messages
    */
   async getMessages(
     conversationId: string,
@@ -86,7 +88,14 @@ export class ChatAPI {
       after_message_id?: string
     }
   ): Promise<ChatMessage[]> {
-    return httpClient.get<ChatMessage[]>(`/chat/conversations/${conversationId}/messages`, { params })
+    try {
+      // 调用getConversation获取完整对话数据
+      const conversation = await this.getConversation(conversationId)
+      return conversation.messages || []
+    } catch (error) {
+      console.error('获取对话消息失败:', error)
+      throw error
+    }
   }
 
   /**

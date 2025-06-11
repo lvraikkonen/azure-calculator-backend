@@ -21,6 +21,11 @@ const routes: RouteRecordRaw[] = [
     path: '/debug-auth',
     name: 'DebugAuth',
     component: () => import('@/views/DebugAuthView.vue')
+  },
+  {
+    path: '/test-composables',
+    name: 'TestComposables',
+    component: () => import('@/views/TestComposablesView.vue')
   }
 ]
 
