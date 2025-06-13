@@ -168,6 +168,9 @@ export function useChat() {
 
     if (!ensureModelSelected()) return null
 
+    // 设置发送状态
+    chatStore.setIsSending(true)
+
     try {
       const request: SendMessageRequest = {
         content: content.trim(),
@@ -325,6 +328,9 @@ export function useChat() {
         message: error instanceof Error ? error.message : '发送流式消息时发生错误'
       })
       return null
+    } finally {
+      // 重置发送状态
+      chatStore.setIsSending(false)
     }
   }
 
@@ -440,6 +446,34 @@ export function useChat() {
     chatStore.clearError()
   }
 
+  // 添加本地消息到当前对话
+  const addLocalMessages = (messages: any[]): void => {
+    const currentConvId = chatStore.currentConversationId
+    if (currentConvId && messages.length > 0) {
+      chatStore.addLocalMessages(currentConvId, messages)
+    }
+  }
+
+  // 截断消息列表（删除从指定索引开始的所有消息）
+  const truncateMessages = async (conversationId: string, fromIndex: number): Promise<void> => {
+    try {
+      await chatStore.truncateMessages(conversationId, fromIndex)
+
+      uiStore.addNotification({
+        type: 'success',
+        title: '消息已删除',
+        message: '已删除指定位置之后的所有消息'
+      })
+    } catch (error) {
+      uiStore.addNotification({
+        type: 'error',
+        title: '删除失败',
+        message: error instanceof Error ? error.message : '删除消息时发生错误'
+      })
+      throw error
+    }
+  }
+
   // 输入框辅助函数
   const handleKeyPress = (event: KeyboardEvent): void => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -510,6 +544,9 @@ export function useChat() {
     deleteConversation,
     updateConversationTitle,
     refreshConversations,
+    fetchMessages: chatStore.fetchMessages,
+    addLocalMessages,
+    truncateMessages,
     clearError,
     
     // 输入辅助

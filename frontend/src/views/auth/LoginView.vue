@@ -56,14 +56,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { authAPI, storage } from '@/services'
+import { useAuthStore } from '@/stores/auth'
 import type { LoginRequest } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
 const loginFormRef = ref<FormInstance>()
 const isLoading = ref(false)
 
@@ -92,7 +95,7 @@ const handleLogin = async (): Promise<void> => {
 
     isLoading.value = true
 
-    // 使用认证服务进行登录
+    // 使用认证store进行登录
     const credentials: LoginRequest = {
       username: loginForm.username,
       password: loginForm.password
@@ -104,55 +107,33 @@ const handleLogin = async (): Promise<void> => {
     const debugLog: string[] = []
     debugLog.push(`🔐 开始登录，用户名: ${credentials.username}`)
 
-    const response = await authAPI.login(credentials)
-    console.log('✅ 登录响应:', response)
-    debugLog.push(`✅ 登录响应成功，token类型: ${response.token_type}`)
+    // 通过认证store登录
+    const loginSuccess = await authStore.login(credentials)
 
-    // 验证token格式
-    if (!response.access_token) {
-      throw new Error('登录响应中缺少access_token')
+    if (!loginSuccess) {
+      throw new Error('登录失败，请检查用户名和密码')
     }
 
-    console.log('💾 保存token:', response.access_token.substring(0, 20) + '...')
-    debugLog.push(`💾 Token长度: ${response.access_token.length}`)
-    debugLog.push(`💾 Token前缀: ${response.access_token.substring(0, 20)}...`)
-
-    // 保存认证信息
-    storage.setAuthToken(response.access_token)
-
-    // 验证token是否正确保存
-    const savedToken = storage.getAuthToken()
-    console.log('🔍 验证保存的token:', savedToken?.substring(0, 20) + '...')
-    debugLog.push(`🔍 保存验证: ${savedToken ? '成功' : '失败'}`)
-
-    // 同时检查原生localStorage
-    const rawToken = window.localStorage.getItem('auth_token')
-    console.log('🔍 原生localStorage中的token:', rawToken?.substring(0, 20) + '...')
-    debugLog.push(`🔍 原生localStorage: ${rawToken ? '存在' : '不存在'}`)
-
-    // 获取用户信息
-    console.log('👤 获取用户信息...')
-    debugLog.push('👤 开始获取用户信息...')
-
-    const userInfo = await authAPI.getCurrentUser()
-    storage.setUserInfo(userInfo)
-    debugLog.push(`👤 用户信息获取成功: ${userInfo.username}`)
+    console.log('✅ 登录成功，认证状态已更新')
+    debugLog.push(`✅ 登录成功，认证状态: ${authStore.isAuthenticated}`)
+    debugLog.push(`👤 用户信息: ${authStore.user?.username}`)
+    debugLog.push(`🔑 Token状态: ${authStore.token ? '已设置' : '未设置'}`)
 
     // 保存调试日志
     localStorage.setItem('login_debug_log', JSON.stringify(debugLog))
 
     ElMessage.success('登录成功！')
-    console.log('✅ 登录成功，用户信息:', userInfo)
-    console.log('🎉 登录流程完成，请查看上面的日志信息')
+    console.log('✅ 登录成功，用户信息:', authStore.user)
+    console.log('🎉 登录流程完成，认证状态已更新')
 
-    // 临时注释跳转，方便查看日志
-    // router.push('/')
+    // 获取重定向路径，如果没有则跳转到聊天页面
+    const redirectPath = route.query.redirect as string || '/chat'
+    console.log('🔄 登录成功，跳转到:', redirectPath)
+    console.log('🔍 当前认证状态:', authStore.isAuthenticated)
 
-    // 5秒后自动跳转
-    setTimeout(() => {
-      console.log('🔄 5秒后自动跳转到首页')
-      router.push('/')
-    }, 5000)
+    // 等待一下确保状态更新完成，然后跳转
+    await nextTick()
+    router.push(redirectPath)
   } catch (error) {
     console.error('❌ 登录错误:', error)
     ElMessage.error(`登录失败: ${error instanceof Error ? error.message : '未知错误'}`)

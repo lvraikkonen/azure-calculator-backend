@@ -103,11 +103,9 @@ export const useChatStore = defineStore('chat', () => {
   // 设置当前对话
   const setCurrentConversation = async (conversationId: string): Promise<void> => {
     currentConversationId.value = conversationId
-    
-    // 如果还没有加载过这个对话的消息，则加载
-    if (!messages.value[conversationId]) {
-      await fetchMessages(conversationId)
-    }
+
+    // 总是重新获取消息，确保显示最新数据
+    await fetchMessages(conversationId)
   }
 
   // 获取对话消息
@@ -116,17 +114,29 @@ export const useChatStore = defineStore('chat', () => {
       isLoading.value = true
       lastError.value = null
 
+      console.log('🔄 正在获取对话消息:', conversationId)
+
       // 使用getConversation API获取对话及其消息
       const response = await chatService.getConversation(conversationId)
 
+      console.log('📨 获取到的对话数据:', response)
+
       // 提取消息数组
       if (response && response.messages) {
-        messages.value[conversationId] = response.messages
+        console.log('💬 消息列表:', response.messages)
+        // 确保消息角色正确
+        const processedMessages = response.messages.map((msg: any) => ({
+          ...msg,
+          role: msg.role || (msg.sender === 'user' ? 'user' : 'assistant') // 兼容不同的角色字段
+        }))
+        console.log('✅ 处理后的消息:', processedMessages)
+        messages.value[conversationId] = processedMessages
       } else {
+        console.log('⚠️ 没有找到消息数据')
         messages.value[conversationId] = []
       }
     } catch (error) {
-      console.error('获取消息失败:', error)
+      console.error('❌ 获取消息失败:', error)
       lastError.value = '获取消息失败'
       // 确保即使失败也初始化空数组
       messages.value[conversationId] = []
@@ -303,6 +313,11 @@ export const useChatStore = defineStore('chat', () => {
     connectionStatus.value = status
   }
 
+  // 设置发送状态
+  const setIsSending = (sending: boolean) => {
+    isSending.value = sending
+  }
+
   // 设置打字状态
   const setTypingStatus = (typing: boolean) => {
     isTyping.value = typing
@@ -311,6 +326,66 @@ export const useChatStore = defineStore('chat', () => {
   // 清除错误
   const clearError = () => {
     lastError.value = null
+  }
+
+  // 添加本地消息到指定对话
+  const addLocalMessages = (conversationId: string, newMessages: any[]) => {
+    if (!messages.value[conversationId]) {
+      messages.value[conversationId] = []
+    }
+
+    // 添加消息到本地列表
+    messages.value[conversationId].push(...newMessages)
+
+    // 更新对话的最后更新时间
+    const conversation = conversations.value.find(conv => conv.id === conversationId)
+    if (conversation && newMessages.length > 0) {
+      const lastMessage = newMessages[newMessages.length - 1]
+      conversation.updated_at = lastMessage.created_at || new Date().toISOString()
+    }
+  }
+
+  // 截断消息列表（删除从指定索引开始的所有消息）
+  const truncateMessages = async (conversationId: string, fromIndex: number): Promise<void> => {
+    if (!messages.value[conversationId]) {
+      return
+    }
+
+    const messageList = messages.value[conversationId]
+    if (fromIndex >= messageList.length) {
+      return
+    }
+
+    // 获取要删除的消息ID列表（用于后端删除）
+    const messagesToDelete = messageList.slice(fromIndex)
+    const messageIds = messagesToDelete.map(msg => msg.id).filter(id => id && !id.startsWith('temp-'))
+
+    try {
+      // 如果有需要删除的消息，调用后端API
+      if (messageIds.length > 0) {
+        // 这里可以调用后端API删除消息
+        // await chatService.deleteMessages(messageIds)
+        console.log('需要删除的消息ID:', messageIds)
+      }
+
+      // 从本地状态中删除消息
+      messages.value[conversationId] = messageList.slice(0, fromIndex)
+
+      // 更新对话的最后更新时间
+      const conversation = conversations.value.find(conv => conv.id === conversationId)
+      if (conversation) {
+        const remainingMessages = messages.value[conversationId]
+        if (remainingMessages.length > 0) {
+          const lastMessage = remainingMessages[remainingMessages.length - 1]
+          conversation.updated_at = lastMessage.created_at || lastMessage.updated_at
+        } else {
+          conversation.updated_at = new Date().toISOString()
+        }
+      }
+    } catch (error) {
+      console.error('删除消息失败:', error)
+      throw new Error('删除消息失败')
+    }
   }
 
   // 清除所有数据
@@ -349,7 +424,10 @@ export const useChatStore = defineStore('chat', () => {
     updateConversationTitle,
     addReceivedMessage,
     updateMessageStatus,
+    addLocalMessages,
+    truncateMessages,
     setConnectionStatus,
+    setIsSending,
     setTypingStatus,
     clearError,
     clearAllData

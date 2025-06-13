@@ -8,6 +8,7 @@ import App from './App.vue'
 import router from './router'
 import pinia from './stores'
 import { initializeServices } from './services'
+import { useAuthStore } from './stores/auth'
 
 const app = createApp(App)
 
@@ -15,6 +16,10 @@ const app = createApp(App)
 app.use(pinia)
 app.use(router)
 app.use(ElementPlus)
+
+// 初始化认证状态
+const authStore = useAuthStore()
+authStore.initializeAuth()
 
 // 初始化服务
 initializeServices().catch(console.error)

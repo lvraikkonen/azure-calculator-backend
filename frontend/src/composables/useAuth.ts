@@ -173,7 +173,7 @@ export function useAuth() {
   const requireAuth = (): boolean => {
     if (!isAuthenticated.value) {
       router.push({
-        path: '/auth/login',
+        path: '/login',
         query: { redirect: router.currentRoute.value.fullPath }
       })
       return false

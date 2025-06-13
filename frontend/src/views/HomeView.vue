@@ -9,22 +9,72 @@
           欢迎使用AI智能对话系统，请先登录以开始使用。
         </p>
         <div class="space-y-4">
-          <el-button 
-            type="primary" 
-            size="large" 
+          <el-button
+            type="primary"
+            size="large"
             class="w-full"
             @click="goToLogin"
           >
             立即登录
           </el-button>
-          <el-button 
-            size="large" 
+          <el-button
+            type="success"
+            size="large"
+            class="w-full"
+            @click="goToChat"
+          >
+            进入聊天
+          </el-button>
+          <el-button
+            size="large"
             class="w-full"
             @click="testApiConnection"
             :loading="isTestingApi"
           >
             测试API连接
           </el-button>
+
+          <!-- 开发测试链接 -->
+          <div class="border-t pt-4 mt-6">
+            <p class="text-sm text-secondary mb-3">开发测试页面:</p>
+            <div class="space-y-2">
+              <el-button
+                size="small"
+                class="w-full"
+                @click="goToTestStores"
+              >
+                Phase 4: 状态管理测试
+              </el-button>
+              <el-button
+                size="small"
+                class="w-full"
+                @click="goToTestComposables"
+              >
+                Phase 5: 组合式函数测试
+              </el-button>
+              <el-button
+                size="small"
+                class="w-full"
+                @click="goToChat"
+              >
+                Phase 5: AI聊天界面验证
+              </el-button>
+              <el-button
+                size="small"
+                class="w-full"
+                @click="goToDebugAuth"
+              >
+                认证调试页面
+              </el-button>
+              <el-button
+                size="small"
+                class="w-full"
+                @click="goToAuthDebug"
+              >
+                新版认证调试页面
+              </el-button>
+            </div>
+          </div>
         </div>
         
         <!-- API连接状态显示 -->
@@ -59,6 +109,26 @@ const apiStatusClass = computed(() => {
 
 const goToLogin = (): void => {
   router.push('/login')
+}
+
+const goToChat = (): void => {
+  router.push('/chat')
+}
+
+const goToTestStores = (): void => {
+  router.push('/test-stores')
+}
+
+const goToTestComposables = (): void => {
+  router.push('/test-composables')
+}
+
+const goToDebugAuth = (): void => {
+  router.push('/debug-auth')
+}
+
+const goToAuthDebug = (): void => {
+  router.push('/auth-debug')
 }
 
 const testApiConnection = async (): Promise<void> => {
